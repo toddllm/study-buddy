@@ -1,142 +1,127 @@
 # MLC-LLM Troubleshooting Guide
 
-This guide will help you resolve issues with the MLC-LLM integration in the StudyBuddy app.
+This guide provides solutions for common issues encountered when using MLC-LLM integration in StudyBuddy.
 
 ## Common Issues
 
-### "Failed to initialize MLC-LLM" Error
+### Installation Problems
 
-This error can occur for several reasons:
+#### UnsatisfiedLinkError when loading libraries
 
-1. **Missing Model Files**: The model files aren't properly extracted in the assets directory
-2. **Library Loading Issues**: The native libraries aren't being found or loaded properly
-3. **Model Path Issues**: The app can't access the model files at runtime
+**Problem:** App crashes with `UnsatisfiedLinkError: dlopen failed: library "libtvm_runtime.so" not found`
 
-## Diagnosing the Problem
+**Solutions:**
+1. Check that all required libraries are included in the `app/src/main/jniLibs/arm64-v8a/` directory
+2. Verify library loading order in `MlcLlmBridge.kt`
+3. Make sure the build.gradle configuration includes the correct ABI filters
 
-Run the provided debugging scripts to gather more information:
-
-```bash
-# Collect debug information about model files and libraries
-./collect_debug_info.sh
-
-# Manually extract and prepare model files
-./manually_prepare_models.sh
+```kotlin
+android {
+    defaultConfig {
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+    }
+}
 ```
 
-## Step-by-Step Solutions
+#### Library incompatibility
 
-### 1. Model Files Preparation
+**Problem:** `java.lang.UnsatisfiedLinkError: ... version 'GLIBCXX_X.X.X' not found`
 
-Make sure the model files are properly extracted:
+**Solution:** Rebuild the native libraries with the correct NDK version (NDK 26.1.10909125 recommended)
 
-1. Check if the tar file `gemma-2b-it-q4f16_1-android.tar` exists in `app/src/main/assets/`
-2. If it exists, try manually extracting it:
-   ```bash
-   ./manually_prepare_models.sh
+### Runtime Issues
+
+#### Out of memory errors
+
+**Problem:** `java.lang.OutOfMemoryError` when initializing model
+
+**Solutions:**
+1. Increase app memory limit in AndroidManifest.xml:
+   ```xml
+   <application android:largeHeap="true" ...>
    ```
-3. Verify that files are extracted to `app/src/main/assets/models/gemma2_2b_it/`
-4. Make sure a `config.json` file exists in the model directory
+2. Use a smaller model or a more efficient quantization
+3. Close other apps before running StudyBuddy
 
-### 2. Native Libraries Issues
+#### Slow performance
 
-Check that the native libraries are properly included:
+**Problem:** Model inference is taking too long
 
-1. Look in `app/src/main/jniLibs/arm64-v8a/` for these libraries:
-   - `libc++_shared.so`
-   - `libtvm_runtime.so`
-   - `libtvm.so`
-   - `libmlc_llm.so`
-   - `libmlc_llm_module.so`
+**Solutions:**
+1. Check device temperature (thermal throttling may occur)
+2. Close background applications
+3. Reduce the generation parameters (max_gen_len, temperature)
+4. Use a smaller model or more aggressive quantization
 
-2. If any are missing, you can rebuild them using:
-   ```bash
-   ./scripts/build_android_tvm.sh
-   ./scripts/prepare_libs_for_android.sh
-   ```
+#### Incorrect or poor quality responses
 
-3. Make sure your app's build.gradle.kts has the correct configuration:
-   ```kotlin
-   android {
-       defaultConfig {
-           ndk {
-               abiFilters.clear()
-               abiFilters.add("arm64-v8a")
-           }
-       }
-   }
-   ```
+**Problem:** Model generates nonsensical or low-quality responses
 
-### 3. Runtime Permissions and Access
+**Solutions:**
+1. Verify the model was correctly downloaded and extracted
+2. Check that the tokenizer file is properly loaded
+3. Try adjusting the temperature (lower for more focused responses)
+4. Make sure the prompt is clear and well-formatted
 
-Make sure the app has the necessary permissions:
+### Model Loading Issues
 
-1. Storage permissions should be requested at runtime if needed
-2. The model directory should be accessible (use the app's files directory)
+#### Model not found
 
-### 4. Checking Logs
+**Problem:** `Error: Failed to open model file at path...`
 
-Look for detailed error logs in Logcat:
+**Solutions:**
+1. Check that the model files are correctly placed in the assets directory
+2. Verify the model path is correctly passed to the initialization method
+3. Check file permissions for the app's storage directory
 
-1. Use the tag `TVMBridge` to filter logs related to the JNI bridge
-2. Use the tag `MLCLLMService` to filter logs related to model loading
+#### Model too large
 
-### 5. Step-by-Step Verification
+**Problem:** Model fails to load due to size constraints
 
-1. First check if the native libraries load successfully:
-   ```java
-   if (TVMBridge.areLibrariesLoaded()) {
-       // Libraries loaded successfully
-   }
-   ```
+**Solutions:**
+1. Use a more aggressive quantization method 
+2. Split the model into smaller chunks
+3. Try a smaller model variant (2B instead of 7B, for example)
 
-2. Then check if the model files are extracted properly by looking at the logs:
-   ```
-   Log: Successfully extracted model files to: /data/user/0/com.example.studybuddy/files/mlc_models/gemma2_2b_it
-   ```
+## Debugging Techniques
 
-3. Finally, check if the model initialization succeeds:
-   ```
-   Log: MLC-LLM initialization successful
-   ```
+### Enable Debug Logging
 
-## Advanced Troubleshooting
+Add the following to your application class to enable detailed logging:
 
-If the above steps don't resolve the issue:
-
-1. Try creating a minimal test app that only loads the MLC-LLM runtime
-2. Try with a smaller model to verify the integration works
-3. Make sure the device architecture (arm64-v8a) matches the built libraries
-
-## File Structure Reference
-
-The model files should be organized as follows:
-
-```
-app/src/main/assets/
-└── models/
-    └── gemma2_2b_it/
-        ├── config.json
-        ├── [model files]
-        └── ...
+```kotlin
+class MyApplication : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        
+        // Set log level to Debug
+        Log.d("StudyBuddy", "Debug logging enabled")
+        
+        // Additional initialization
+    }
+}
 ```
 
-The native libraries should be in:
+### Check Native Logs
+
+View native logs using ADB:
 
 ```
-app/src/main/jniLibs/
-└── arm64-v8a/
-    ├── libc++_shared.so
-    ├── libtvm_runtime.so
-    ├── libtvm.so
-    ├── libmlc_llm.so
-    └── libmlc_llm_module.so
+adb logcat *:W MLC_LLM_JNI:V
 ```
 
-## Contact Support
+### Profile Memory Usage
 
-If you continue to encounter issues after following these steps, please contact support with:
+Monitor memory usage:
 
-1. The output of `./collect_debug_info.sh`
-2. Complete logcat output from the app
-3. Details about your device model and Android version 
+```
+adb shell dumpsys meminfo com.example.studybuddy
+```
+
+## Support Resources
+
+1. MLC-LLM GitHub repository: https://github.com/mlc-ai/mlc-llm
+2. TVM documentation: https://tvm.apache.org/docs/
+3. StudyBuddy GitHub issues: https://github.com/toddllm/study-buddy/issues 

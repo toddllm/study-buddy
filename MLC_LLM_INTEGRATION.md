@@ -1,6 +1,92 @@
-# MLC-LLM Full Integration Guide for StudyBuddy
+# MLC-LLM Integration in StudyBuddy
 
-This guide explains how to complete the full integration of MLC-LLM with the StudyBuddy Android app to enable on-device inference with the Gemma 2 model.
+This document provides details on how StudyBuddy integrates the MLC-LLM framework for on-device inference.
+
+## Overview
+
+[MLC-LLM](https://github.com/mlc-ai/mlc-llm) is an open-source framework that enables the deployment of Large Language Models (LLMs) across diverse hardware backends and device targets, including Android devices. StudyBuddy uses MLC-LLM to run the Gemma 2B-IT model directly on-device.
+
+## Key Components
+
+### 1. Model Compilation
+
+The Gemma 2B-IT model is compiled with TVM and MLC-LLM to optimize it for mobile devices. Key optimizations include:
+
+- Quantization to 4-bit for reduced memory footprint
+- TVM graph-level optimizations
+- Hardware-specific acceleration where available
+
+### 2. Native Libraries
+
+The integration relies on several native libraries:
+
+- `libtvm_runtime.so` - TVM runtime library
+- `libtvm.so` - Core TVM library
+- `libmlc_llm.so` - MLC-LLM implementation
+- `libmlc_llm_jni.so` - JNI bridge
+
+### 3. Model Directory Structure
+
+The model is stored in the app's assets directory with the following structure:
+
+```
+app/src/main/assets/models/gemma2_2b_it/
+├── params/
+│   ├── params_shard_0.bin
+│   ├── params_shard_1.bin
+│   └── ...
+├── configs.json
+├── model.bin
+└── tokenizer.model
+```
+
+### 4. Runtime Flow
+
+1. The model is loaded from assets into device storage
+2. MLC-LLM engine is initialized with the model path
+3. TVM runtime compiles and optimizes for the specific device
+4. Inference requests are processed through the JNI bridge
+5. Responses are streamed back to the UI
+
+## Implementation Details
+
+### Model Configuration
+
+The model configuration is managed via JSON:
+
+```json
+{
+  "model_type": "gemma",
+  "quantization": "q4f16_0",
+  "context_length": 8192,
+  "vocab_size": 256000,
+  "model_layer_count": 18
+}
+```
+
+### Performance Considerations
+
+- Model initialization may take several seconds
+- First inference typically takes longer than subsequent ones
+- Memory usage peaks during initialization
+- Battery consumption varies by device capability
+
+### Error Handling
+
+The integration includes robust error handling for:
+
+- Model loading failures
+- Out-of-memory conditions
+- Invalid inputs
+- Timeout conditions
+
+## Future Improvements
+
+1. Support for more models (Phi-2, Llama, etc.)
+2. Improved memory management
+3. Multi-language support
+4. More configuration options for inference
+5. Enhanced quantization strategies
 
 ## Prerequisites
 
