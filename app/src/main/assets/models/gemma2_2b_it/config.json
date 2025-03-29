@@ -1,0 +1,6 @@
+{
+    "model_name": "gemma-2b-it",
+    "quantization": "q4f16_1",
+    "model_lib": "libmlc_llm.so",
+    "runtime_lib": "libtvm_runtime.so"
+}

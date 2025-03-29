@@ -1,0 +1,13 @@
+{
+  "model_lib": "gemma-2b-it-q4f16_1",
+  "model_name": "gemma-2b-it",
+  "conv_template": "gemma-2b-instruct",
+  "temperature": 0.7,
+  "repetition_penalty": 1.1,
+  "top_p": 0.95,
+  "max_gen_len": 1024,
+  "model_lib_path": "",
+  "mean_gen_len": 256,
+  "shift_fill_factor": 0.3,
+  "tokenizer_files": []
+} 

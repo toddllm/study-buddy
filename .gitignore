@@ -1,0 +1,79 @@
+# Built application files
+*.apk
+*.aar
+*.ap_
+*.aab
+
+# Files for the ART/Dalvik VM
+*.dex
+
+# Java class files
+*.class
+
+# Generated files
+bin/
+gen/
+out/
+
+# Gradle files
+.gradle/
+build/
+
+# Local configuration file (sdk path, etc)
+local.properties
+
+# Log Files
+*.log
+
+# Android Studio Navigation editor temp files
+.navigation/
+
+# Android Studio captures folder
+captures/
+
+# IntelliJ
+*.iml
+.idea/
+
+# Keystore files
+*.jks
+*.keystore
+
+# External native build folder generated in Android Studio
+.externalNativeBuild/
+.cxx/
+
+# Google Services (e.g. APIs or Firebase)
+google-services.json
+
+# Version control
+vcs.xml
+
+# lint
+lint/intermediates/
+lint/generated/
+lint/outputs/
+lint/tmp/
+
+# MacOS specific
+.DS_Store
+
+# Large model files
+*.bin
+*.tflite
+*.model
+*.tar
+*.so
+*.a
+app/src/main/assets/models/gemma2_2b_it/params_shard_*.bin
+app/src/main/assets/models/*/tokenizer.model
+
+# Large build artifacts
+mlc_build/
+mlc_build_android/
+mlc_llm_temp/
+app/build/
+app/src/main/jniLibs/
+
+# Keep model structure but not the large files
+!app/src/main/assets/models/gemma2_2b_it/.gitkeep

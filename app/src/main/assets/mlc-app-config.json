@@ -1,0 +1,12 @@
+{
+  "model_libs": [
+    "gemma-2b-it-q4f16_1"
+  ],
+  "model_list": [
+    {
+      "model_url": "https://huggingface.co/mlc-ai/gemma-2b-it-q4f16_1-MLC/",
+      "local_id": "gemma-2b-it-q4f16_1"
+    }
+  ],
+  "add_model_samples": []
+}

@@ -1,0 +1,7 @@
+{
+  "model_lib": "gemma-2b-it-q4f16_1",
+  "model_name": "gemma-2b-it",
+  "conv_template": "gemma-2b-instruct",
+  "temperature": 0.7,
+  "top_p": 0.95
+}
