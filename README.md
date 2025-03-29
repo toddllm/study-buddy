@@ -1,73 +1,88 @@
-# StudyBuddy with MLC-LLM
+# StudyBuddy - On-device AI Learning Assistant
 
-An Android application that uses on-device machine learning to analyze images and text to provide educational responses using Google's Gemma 2 model powered by MLC-LLM.
+StudyBuddy is an Android application that leverages on-device AI models to provide an intelligent learning assistant. The app uses MLC-LLM (Machine Learning Compilation for LLMs) to run Gemma 2B-IT models directly on Android devices without requiring internet connectivity.
 
 ## Features
 
-- Text extraction from images with ML Kit OCR
-- Image classification with TensorFlow Lite (as fallback)
-- On-device Language processing with Google's Gemma 2 (2B parameters) using MLC-LLM
-- Completely runs on-device (no server required)
-- Fallback mechanisms if primary models aren't available
+- **On-device LLM**: Run Gemma 2B-IT models directly on your Android device
+- **OCR Integration**: Scan study materials and extract text
+- **Image Classification**: Identify objects and content in images
+- **Chat Interface**: Interact with the AI through a conversational interface
+- **Offline Operation**: Works without an internet connection
 
-## Setup MLC-LLM
+## Requirements
 
-To properly integrate MLC-LLM and the Gemma 2 model, follow these steps:
+- Android Studio Arctic Fox or newer
+- Android SDK 24+
+- Android device with ARM64 architecture
+- At least 4GB of RAM on device
+- NDK 26.1.10909125
+- CMake 3.22+
 
-### Prerequisites
+## Setup and Installation
 
-- Python 3.8+ with pip
-- Git
-- Android Studio
-- 10+ GB of free disk space for building
-- A Hugging Face account and token (optional but recommended)
+1. Clone the repository:
+   ```
+   git clone https://github.com/toddllm/study-buddy.git
+   ```
 
-### Step 1: Run the Setup Script
+2. Open the project in Android Studio
 
-The provided `setup_mlc_llm.sh` script handles downloading and building MLC-LLM:
+3. Download the Gemma 2B-IT model:
+   ```
+   ./download_gemma_model.sh
+   ```
+   Note: You need to have a Google Cloud account and access to the Gemma model.
 
-```bash
-# Make the script executable
-chmod +x setup_mlc_llm.sh
+4. Build the application:
+   ```
+   ./gradlew assembleDebug
+   ```
 
-# Run the script
-./setup_mlc_llm.sh
-```
+5. Install on your device:
+   ```
+   ./gradlew installDebug
+   ```
 
-This script:
-1. Clones the MLC-LLM repository
-2. Sets up a Python environment
-3. Installs dependencies
-4. Builds MLC-LLM for Android
-5. Copies the necessary files to your project
+## Project Structure
 
-### Step 2: Get a Hugging Face Token (Optional)
+- `/app/src/main/java/com/example/studybuddy/`: Main application code
+  - `/ml/`: Machine learning implementation
+  - `/ui/`: User interface components
+  - `/utils/`: Utility classes
+- `/app/src/main/cpp/`: Native code for MLC-LLM integration
+- `/app/src/main/assets/`: Model configuration files and resources
 
-If you want to access gated models or have better download rates:
+## JNI Integration
 
-1. Create or log into your [Hugging Face account](https://huggingface.co/login)
-2. Go to https://huggingface.co/settings/tokens
-3. Create a new token with "read" permissions
-4. Copy this token to use in the app
+This project uses JNI (Java Native Interface) to bridge between Kotlin/Java and the native C++ code that runs the MLC-LLM model. Key files:
 
-### Step 3: Build and Run the App
+- `app/src/main/java/com/example/studybuddy/ml/MlcLlmBridge.kt`: JNI bridge in Kotlin
+- `app/src/main/cpp/mlc_jni/mlc_llm_jni.cpp`: Native implementation
+- `app/src/main/cpp/CMakeLists.txt`: Native build configuration
 
-Open the project in Android Studio and run it on your Pixel 8 Pro. When first launched, the app will:
+For more details on the JNI integration, see [JNI_INTEGRATION.md](JNI_INTEGRATION.md).
 
-1. Display a download screen for the Gemma 2 model
-2. Allow you to enter your Hugging Face token (optional)
-3. Download and prepare the model (only needed once)
-4. Show the main app interface when ready
+## MLC-LLM Integration
+
+The app integrates [MLC-LLM](https://github.com/mlc-ai/mlc-llm), a framework for deploying and running LLMs across different platforms. Key components:
+
+- TVM runtime for optimized execution
+- Custom JNI bridges for Kotlin/C++ communication
+- Model quantization (Q4F16) for efficient execution
+
+For more details on the MLC-LLM integration, see [MLC_LLM_INTEGRATION.md](MLC_LLM_INTEGRATION.md).
 
 ## Troubleshooting
 
-If you encounter any issues:
-
-1. **Build errors**: Make sure Java 17 is installed and selected in your project
-2. **Download issues**: Check internet connection and verify your Hugging Face token
-3. **Memory errors**: The app requires a device with at least 4GB of RAM
-4. **Model crashes**: The app will automatically fall back to TensorFlow Lite models
+If you encounter issues, please check the [MLC_LLM_TROUBLESHOOTING.md](MLC_LLM_TROUBLESHOOTING.md) file for common solutions.
 
 ## License
 
-This project uses MLC-LLM under the Apache 2.0 license and Google's Gemma 2 model under the [Gemma Terms of Use](https://ai.google.dev/gemma/terms). 
+This project is licensed under the Apache 2.0 License - see the LICENSE file for details.
+
+## Acknowledgements
+
+- [MLC-LLM](https://github.com/mlc-ai/mlc-llm) - Machine Learning Compilation for LLMs
+- [TVM](https://github.com/apache/tvm) - An open-source machine learning compiler framework
+- [Gemma](https://blog.google/technology/developers/gemma-open-models/) - Google's open LLM 
