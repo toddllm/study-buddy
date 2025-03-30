@@ -255,8 +255,26 @@ extern "C" {
         const char* keyStr = env->GetStringUTFChars(key, 0);
         LOGI("Parameter %s = %f", keyStr, value);
         
-        // Call the real Gemma library function through function pointer
-        g_set_parameter_fn(keyStr, value);
+        // SAFETY WRAPPER: Try/catch block to prevent crashes
+        try {
+            // Extra safety check for null pointers
+            if (keyStr != nullptr) {
+                // Make a copy of the string to ensure it's null-terminated and valid
+                char* safeKey = strdup(keyStr);
+                if (safeKey != nullptr) {
+                    LOGI("Calling native set_parameter with safe key");
+                    // Call the real Gemma library function through function pointer
+                    g_set_parameter_fn(safeKey, value);
+                    free(safeKey);
+                } else {
+                    LOGE("Failed to create safe copy of parameter key");
+                }
+            } else {
+                LOGE("Parameter key string is null");
+            }
+        } catch (...) {
+            LOGE("Exception caught in set_parameter");
+        }
         
         // Release the string
         env->ReleaseStringUTFChars(key, keyStr);
