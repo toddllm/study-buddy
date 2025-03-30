@@ -36,7 +36,8 @@ bool initialize_gemma_library() {
     
     if (g_lib_handle == nullptr) {
         const char* error = dlerror();
-        LOGE("Failed to load Gemma library: %s", error ? error : "unknown error");
+        LOGE("CRITICAL ERROR: Failed to load Gemma library: %s", error ? error : "unknown error");
+        LOGE("CRITICAL ERROR: Real Gemma model is required. Implementation verification failed.");
         return false;
     }
     
@@ -48,7 +49,8 @@ bool initialize_gemma_library() {
     // Resolve function pointers
     g_create_module_fn = (CreateModuleFn)dlsym(g_lib_handle, "mlc_create_chat_module");
     if (g_create_module_fn == nullptr) {
-        LOGE("Failed to resolve mlc_create_chat_module: %s", dlerror());
+        LOGE("CRITICAL ERROR: Function 'mlc_create_chat_module' not found in model library.");
+        LOGE("CRITICAL ERROR: Real Gemma model is required. Implementation verification failed.");
         dlclose(g_lib_handle);
         g_lib_handle = nullptr;
         return false;
@@ -56,7 +58,8 @@ bool initialize_gemma_library() {
     
     g_generate_fn = (GenerateFn)dlsym(g_lib_handle, "generate");
     if (g_generate_fn == nullptr) {
-        LOGE("Failed to resolve generate: %s", dlerror());
+        LOGE("CRITICAL ERROR: Function 'generate' not found in model library.");
+        LOGE("CRITICAL ERROR: Real Gemma model is required. Implementation verification failed.");
         dlclose(g_lib_handle);
         g_lib_handle = nullptr;
         return false;
@@ -64,7 +67,8 @@ bool initialize_gemma_library() {
     
     g_reset_chat_fn = (ResetChatFn)dlsym(g_lib_handle, "reset_chat");
     if (g_reset_chat_fn == nullptr) {
-        LOGE("Failed to resolve reset_chat: %s", dlerror());
+        LOGE("CRITICAL ERROR: Function 'reset_chat' not found in model library.");
+        LOGE("CRITICAL ERROR: Real Gemma model is required. Implementation verification failed.");
         dlclose(g_lib_handle);
         g_lib_handle = nullptr;
         return false;
@@ -72,7 +76,8 @@ bool initialize_gemma_library() {
     
     g_set_parameter_fn = (SetParameterFn)dlsym(g_lib_handle, "set_parameter");
     if (g_set_parameter_fn == nullptr) {
-        LOGE("Failed to resolve set_parameter: %s", dlerror());
+        LOGE("CRITICAL ERROR: Function 'set_parameter' not found in model library.");
+        LOGE("CRITICAL ERROR: Real Gemma model is required. Implementation verification failed.");
         dlclose(g_lib_handle);
         g_lib_handle = nullptr;
         return false;
@@ -115,7 +120,7 @@ extern "C" {
             LOGE("CRITICAL ERROR: Failed to create chat module - real implementation required");
             env->ThrowNew(
                 env->FindClass("java/lang/RuntimeException"),
-                "Failed to initialize real Gemma language model - no mock implementation allowed"
+                "Failed to initialize real Gemma language model - proper implementation required"
             );
             return nullptr;
         }
@@ -160,7 +165,7 @@ extern "C" {
             LOGE("CRITICAL ERROR: Failed to generate response - real implementation required");
             env->ThrowNew(
                 env->FindClass("java/lang/RuntimeException"),
-                "Failed to generate response using real Gemma language model - no mock implementation allowed"
+                "Failed to generate response using real Gemma language model - check logs for details"
             );
             return env->NewStringUTF("ERROR: Failed to generate response from real LLM");
         }

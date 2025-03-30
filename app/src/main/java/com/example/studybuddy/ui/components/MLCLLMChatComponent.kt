@@ -29,7 +29,9 @@ import androidx.compose.material.icons.filled.Send
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.animation.core.*
-import com.example.studybuddy.ml.MLCLLMService
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.SuggestionChip
 import com.example.studybuddy.ml.MlcLanguageModel
 
 // Data class to represent a message in the chat
@@ -58,54 +60,52 @@ fun MLCLLMChatComponent(
     var isLoading by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf("Initializing MLC-LLM...") }
     var showErrorDialog by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
     
     // Chat history
     var chatHistory by remember { mutableStateOf(listOf<ChatMessage>()) }
     val scrollState = rememberLazyListState()
     
-    // Get the LLMMLC service
-    val llmService = remember { MLCLLMService.getInstance(context) }
-    
-    // Collect model loaded state
-    val isModelLoaded by llmService.isModelLoaded.collectAsState()
-    
-    // Collect streaming text
-    val streamingText by llmService.textStream.collectAsState()
-    
-    // Collect error message
-    val errorMessage by llmService.errorMessage.collectAsState()
-    
-    // Update when streaming text changes
-    LaunchedEffect(streamingText) {
-        if (streamingText.isNotEmpty() && chatHistory.isNotEmpty() && !chatHistory.last().isFromUser) {
-            // Update the last message with streaming text
-            chatHistory = chatHistory.toMutableList().apply {
-                val lastIndex = lastIndex
-                this[lastIndex] = ChatMessage(streamingText.first(), false)
-            }
-        }
-    }
+    // Get the model from parameter
+    val languageModel = remember { model }
+    val modelInitialized = remember { mutableStateOf(false) }
     
     // Initialize the model
     LaunchedEffect(Unit) {
         try {
             withContext(Dispatchers.IO) {
-                val result = llmService.loadModel()
-                withContext(Dispatchers.Main) {
-                    if (result) {
+                try {
+                    // Check if model is already initialized
+                    modelInitialized.value = languageModel.areModelFilesAvailable()
+                    
+                    if (!modelInitialized.value) {
+                        // Model files not available - we'd need to download them first
+                        statusMessage = "Model files not found. Please download the model first."
+                        return@withContext
+                    }
+                    
+                    // Initialize the model
+                    languageModel.initialize()
+                    modelInitialized.value = true
+                    withContext(Dispatchers.Main) {
+                        statusMessage = "MLC-LLM initialized successfully"
                         // Add a welcome message when initialized
                         chatHistory = chatHistory + ChatMessage(
                             "Hello! I'm StudyBuddy AI. How can I help you with your studies today?",
                             false
                         )
-                        statusMessage = "MLC-LLM initialized successfully"
-                    } else {
-                        statusMessage = "Failed to initialize MLC-LLM"
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        statusMessage = "Failed to create MLC-LLM model"
+                        errorMessage = e.message
+                        modelInitialized.value = false
                     }
                 }
             }
         } catch (e: Exception) {
             statusMessage = "Error: ${e.message}"
+            errorMessage = e.message
             chatHistory = chatHistory + ChatMessage(
                 "Error initializing the language model: ${e.message}",
                 false,
@@ -123,7 +123,7 @@ fun MLCLLMChatComponent(
     
     // Function to send a message and get a response
     fun sendMessage() {
-        if (prompt.isBlank() || !isModelLoaded || isLoading) return
+        if (prompt.isBlank() || !modelInitialized.value || isLoading) return
         
         val userMessage = ChatMessage(prompt, true)
         chatHistory = chatHistory + userMessage
@@ -136,6 +136,10 @@ fun MLCLLMChatComponent(
         
         // Generate the context from previous conversation (last few messages)
         val conversationContext = buildString {
+            // Add a system prompt to guide the model's behavior for a study assistant
+            append("Assistant: Hello! I'm StudyBuddy AI, a helpful study assistant. I can answer questions, explain concepts, and help you learn efficiently. How can I assist you today?\n")
+            
+            // Add the recent conversation history (last 6 messages maximum)
             chatHistory.takeLast(6).forEach { message ->
                 if (message.isFromUser) {
                     append("User: ${message.text}\n")
@@ -145,13 +149,38 @@ fun MLCLLMChatComponent(
             }
         }
         
-        // Create a placeholder for the streaming response
+        // Create a placeholder for the response
         chatHistory = chatHistory + ChatMessage("", false)
         
-        // Start streaming generation
+        // Start text generation
         coroutineScope.launch {
             try {
-                llmService.streamText(conversationContext + "User: $currentPrompt")
+                val fullPrompt = conversationContext + "User: $currentPrompt\nAssistant:"
+                
+                // Use streamText for streaming response
+                var responseText = ""
+                
+                languageModel.streamText(
+                    prompt = fullPrompt,
+                    onToken = { token ->
+                        responseText += token
+                        chatHistory = chatHistory.toMutableList().apply {
+                            val lastIndex = lastIndex
+                            this[lastIndex] = ChatMessage(responseText, false)
+                        }
+                    },
+                    onError = { error ->
+                        chatHistory = chatHistory.toMutableList().apply {
+                            val lastIndex = lastIndex
+                            this[lastIndex] = ChatMessage(
+                                "Error generating response: $error",
+                                false,
+                                true
+                            )
+                        }
+                    }
+                )
+                
                 isLoading = false
             } catch (e: Exception) {
                 // Handle errors
@@ -193,10 +222,10 @@ fun MLCLLMChatComponent(
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
-                containerColor = if (isModelLoaded) Color(0xFF4CAF50) else Color(0xFFF44336)
+                containerColor = if (modelInitialized.value) Color(0xFF4CAF50) else Color(0xFFF44336)
             ),
             onClick = { 
-                if (!isModelLoaded && errorMessage != null) {
+                if (!modelInitialized.value && errorMessage != null) {
                     showErrorDialog = true
                 }
             }
@@ -213,7 +242,7 @@ fun MLCLLMChatComponent(
                     color = Color.White
                 )
                 
-                if (!isModelLoaded && errorMessage != null) {
+                if (!modelInitialized.value && errorMessage != null) {
                     TextButton(
                         onClick = { showErrorDialog = true },
                         colors = ButtonDefaults.textButtonColors(
@@ -228,22 +257,72 @@ fun MLCLLMChatComponent(
         
         Spacer(modifier = Modifier.height(16.dp))
         
-        // Chat history display
-        LazyColumn(
+        // Main chat UI layout - after the status indicator card
+        Box(
             modifier = Modifier
+                .fillMaxSize()
                 .weight(1f)
-                .fillMaxWidth(),
-            state = scrollState,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(chatHistory) { message ->
-                ChatMessageBubble(message)
-            }
-            
-            // Show typing indicator if loading
-            if (isLoading) {
-                item {
-                    TypingIndicator()
+            // Chat history display
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                state = scrollState,
+                contentPadding = PaddingValues(vertical = 8.dp)
+            ) {
+                // Add suggested topics at the top if this is a fresh conversation
+                if (chatHistory.isEmpty() || (chatHistory.size == 1 && !chatHistory[0].isFromUser)) {
+                    item {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(8.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer
+                            )
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp)
+                            ) {
+                                Text(
+                                    text = "Study Topics",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                
+                                Spacer(modifier = Modifier.height(8.dp))
+                                
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    SuggestedTopic("Explain quantum physics") { 
+                                        prompt = it
+                                        sendMessage()
+                                    }
+                                    SuggestedTopic("Calculus help") { 
+                                        prompt = it
+                                        sendMessage()
+                                    }
+                                    SuggestedTopic("Photosynthesis") { 
+                                        prompt = it
+                                        sendMessage()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Display chat messages
+                items(chatHistory) { message ->
+                    ChatMessageItem(message)
+                }
+                
+                // Show typing indicator if loading
+                if (isLoading) {
+                    item {
+                        TypingIndicator()
+                    }
                 }
             }
         }
@@ -262,9 +341,9 @@ fun MLCLLMChatComponent(
                 placeholder = { Text("Enter your message...") },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(
-                    onSend = { if (isModelLoaded && !isLoading) sendMessage() }
+                    onSend = { if (modelInitialized.value && !isLoading) sendMessage() }
                 ),
-                enabled = !isLoading && isModelLoaded,
+                enabled = !isLoading && modelInitialized.value,
                 trailingIcon = {
                     if (prompt.isNotEmpty()) {
                         IconButton(onClick = { prompt = "" }) {
@@ -278,7 +357,7 @@ fun MLCLLMChatComponent(
             
             Button(
                 onClick = { sendMessage() },
-                enabled = prompt.isNotEmpty() && !isLoading && isModelLoaded
+                enabled = prompt.isNotEmpty() && !isLoading && modelInitialized.value
             ) {
                 Icon(Icons.Default.Send, contentDescription = "Send")
             }
@@ -287,50 +366,71 @@ fun MLCLLMChatComponent(
 }
 
 /**
- * Displays a chat message bubble.
+ * Display a suggested topic as a chip/button that the user can click to start a conversation
  */
 @Composable
-fun ChatMessageBubble(message: ChatMessage) {
-    val backgroundColor = when {
-        message.isError -> Color(0xFFFFEBEE) // Light red for error messages
-        message.isFromUser -> Color(0xFFE3F2FD) // Light blue for user messages
-        else -> Color(0xFFE8F5E9) // Light green for AI messages
-    }
+fun SuggestedTopic(topic: String, onClick: (String) -> Unit) {
+    SuggestionChip(
+        onClick = { onClick(topic) },
+        label = { Text(topic) }
+    )
+}
+
+/**
+ * Displays a chat message with appropriate styling based on whether it's from the user or AI
+ */
+@Composable
+fun ChatMessageItem(message: ChatMessage) {
+    val isFromUser = message.isFromUser
+    val isError = message.isError
     
-    val textColor = when {
-        message.isError -> Color(0xFFB71C1C) // Dark red for error text
-        else -> Color.Black
-    }
-    
-    val alignment = if (message.isFromUser) Alignment.End else Alignment.Start
-    val shape = when {
-        message.isFromUser -> RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp)
-        else -> RoundedCornerShape(4.dp, 16.dp, 16.dp, 16.dp)
-    }
-    
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = alignment
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp, horizontal = 8.dp),
+        contentAlignment = if (isFromUser) Alignment.CenterEnd else Alignment.CenterStart
     ) {
-        // Sender label
-        Text(
-            text = if (message.isFromUser) "You" else "StudyBuddy AI",
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(start = 8.dp, bottom = 4.dp)
-        )
-        
-        // Message bubble
-        Box(
+        Column(
             modifier = Modifier
-                .widthIn(max = 300.dp)
-                .clip(shape)
-                .background(backgroundColor)
+                .widthIn(max = 320.dp)
+                .clip(
+                    RoundedCornerShape(
+                        topStart = 12.dp,
+                        topEnd = 12.dp,
+                        bottomStart = if (isFromUser) 12.dp else 4.dp,
+                        bottomEnd = if (isFromUser) 4.dp else 12.dp
+                    )
+                )
+                .background(
+                    when {
+                        isError -> MaterialTheme.colorScheme.errorContainer
+                        isFromUser -> MaterialTheme.colorScheme.primaryContainer
+                        else -> MaterialTheme.colorScheme.secondaryContainer
+                    }
+                )
                 .padding(12.dp)
         ) {
             Text(
-                text = message.text.ifEmpty { "..." },
-                color = textColor
+                text = if (isFromUser) "You" else "StudyBuddy AI",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = if (isError) 
+                    MaterialTheme.colorScheme.error 
+                else if (isFromUser) 
+                    MaterialTheme.colorScheme.primary 
+                else 
+                    MaterialTheme.colorScheme.secondary
+            )
+            
+            Spacer(modifier = Modifier.height(4.dp))
+            
+            Text(
+                text = message.text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (isError) 
+                    MaterialTheme.colorScheme.error 
+                else 
+                    MaterialTheme.colorScheme.onSurface
             )
         }
     }

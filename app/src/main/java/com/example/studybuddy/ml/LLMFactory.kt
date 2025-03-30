@@ -17,11 +17,18 @@ class LLMFactory {
         fun createLLM(context: Context): LanguageModel {
             try {
                 Log.d(TAG, "Creating SimpleMlcModel language model")
-                return SimpleMlcModel(context)
+                // Create our SimpleMlcModel which uses the mock implementation
+                val mlcModel = MlcLanguageModel(context)
+                
+                // Check if we have the files but don't initialize yet
+                // Let the component handle initialization
+                return mlcModel
             } catch (e: Exception) {
                 val errorMsg = "Failed to create SimpleMlcModel: ${e.message}"
                 Log.e(TAG, errorMsg, e)
-                throw RuntimeException(errorMsg, e)
+                
+                // Return an error model instead of throwing
+                return ErrorLanguageModel(context, errorMsg)
             }
         }
     }

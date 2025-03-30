@@ -47,10 +47,18 @@ class SimpleMlcModel(context: Context) : LanguageModel(context) {
                 
                 // Check if we have a downloader and if model files are downloaded
                 val modelDownloader = GemmaModelDownloader(context)
-                val modelDirPath = if (modelDownloader.isModelDownloaded()) {
-                    // Use the downloaded model files
+                
+                // First check for a full model download
+                val modelDirPath = if (modelDownloader.isFullModelDownloaded()) {
+                    // Use the fully downloaded model files
                     val downloadedModelDir = modelDownloader.getModelDirectory()
-                    Log.d(tag, "Using downloaded model files from: ${downloadedModelDir.absolutePath}")
+                    Log.d(tag, "Using complete downloaded model files from: ${downloadedModelDir.absolutePath}")
+                    downloadedModelDir.absolutePath
+                } else if (modelDownloader.isModelDownloaded()) {
+                    // Use the partial downloaded model files
+                    val downloadedModelDir = modelDownloader.getModelDirectory()
+                    Log.d(tag, "Using partial downloaded model files from: ${downloadedModelDir.absolutePath}")
+                    Log.w(tag, "Warning: Model files may be incomplete. Consider running a full download.")
                     downloadedModelDir.absolutePath
                 } else {
                     // Fall back to internal model directory
@@ -60,6 +68,16 @@ class SimpleMlcModel(context: Context) : LanguageModel(context) {
                     }
                     Log.d(tag, "Using internal model directory: ${internalModelDir.absolutePath}")
                     internalModelDir.absolutePath
+                }
+                
+                // Verify essential files exist
+                val missingFiles = checkEssentialFiles(modelDirPath)
+                if (missingFiles.isNotEmpty()) {
+                    val errorMsg = "Missing essential model files: ${missingFiles.joinToString(", ")}"
+                    Log.e(tag, errorMsg)
+                    _error.value = errorMsg
+                    _initialized.value = false
+                    throw Exception(errorMsg)
                 }
                 
                 // Initialize the native model
@@ -88,8 +106,33 @@ class SimpleMlcModel(context: Context) : LanguageModel(context) {
                 Log.e(tag, error, e)
                 _error.value = error
                 _initialized.value = false
+                throw e
             }
         }
+    }
+    
+    /**
+     * Check if all essential files exist in the model directory
+     * @return List of missing files (empty if all files are present)
+     */
+    private fun checkEssentialFiles(modelDirPath: String): List<String> {
+        val missingFiles = mutableListOf<String>()
+        val essentialFiles = listOf(
+            "tokenizer_config.json",
+            "tokenizer.json",
+            "tokenizer.model",
+            "mlc-chat-config.json",
+            "ndarray-cache.json"
+        )
+        
+        for (fileName in essentialFiles) {
+            val file = File(modelDirPath, fileName)
+            if (!file.exists() || file.length() <= 0L) {
+                missingFiles.add(fileName)
+            }
+        }
+        
+        return missingFiles
     }
     
     override suspend fun generateText(prompt: String): String {
@@ -102,9 +145,27 @@ class SimpleMlcModel(context: Context) : LanguageModel(context) {
         return withContext(Dispatchers.IO) {
             try {
                 Log.d(tag, "Generating text for prompt: $prompt")
-                val response = generate(prompt)
+                
+                // Preprocess the prompt to ensure correct formatting
+                val formattedPrompt = if (!prompt.endsWith("\nAssistant:")) {
+                    // Make sure the prompt ends with "Assistant:" for proper response generation
+                    if (prompt.contains("Assistant:")) {
+                        prompt
+                    } else {
+                        "$prompt\nAssistant:"
+                    }
+                } else {
+                    prompt
+                }
+                
+                Log.d(tag, "Using formatted prompt: $formattedPrompt")
+                val response = generate(formattedPrompt)
+                
+                // Post-process the response for better display
+                val cleanedResponse = response.trim()
                 Log.d(tag, "Generated text successfully")
-                response
+                
+                cleanedResponse
             } catch (e: Exception) {
                 val error = "Error generating text: ${e.message}"
                 Log.e(tag, error, e)

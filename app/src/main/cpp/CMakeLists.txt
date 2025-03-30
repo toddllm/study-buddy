@@ -11,6 +11,8 @@ set(PREBUILT_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/arm64-v8a)
 # Include directories for TVM headers
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/tvm
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/tvm/runtime
 )
 
 # Add the JNI bridge library - this builds libtvm_bridge.so
@@ -32,6 +34,12 @@ set_target_properties(tvm_runtime PROPERTIES IMPORTED_LOCATION ${PREBUILT_LIB_DI
 add_library(mlc_llm SHARED IMPORTED)
 set_target_properties(mlc_llm PROPERTIES IMPORTED_LOCATION ${PREBUILT_LIB_DIR}/libmlc_llm.so)
 
+# Import the Gemma library (prebuilt by our script)
+add_library(gemma-2-2b-it-q4f16_1 SHARED IMPORTED)
+set_target_properties(gemma-2-2b-it-q4f16_1 PROPERTIES 
+    IMPORTED_LOCATION ${PREBUILT_LIB_DIR}/libgemma-2-2b-it-q4f16_1.so
+)
+
 # Link the JNI bridge with libraries
 target_link_libraries(tvm_bridge
     ${log-lib}
@@ -40,15 +48,7 @@ target_link_libraries(tvm_bridge
     mlc_llm
 )
 
-# For production build, you would link against:
-# Include TVM/MLC-LLM libraries
-# target_link_libraries(mlc_llm_jni
-#     tvm_runtime
-#     mlc_llm_module
-#     ${log-lib}
-# )
-
-# Use the real MLC-LLM implementation
+# Real MLC-LLM JNI implementation
 add_library(mlc_llm_jni SHARED
     real_mlc_llm_jni.cpp
 )
@@ -67,34 +67,6 @@ target_link_libraries(mlc_llm_jni
     mlc_llm
 )
 
-# COMMENTED OUT - We now build this manually with the script
-# instead of through CMake to avoid duplicate library issues
-# add_library(gemma_model_lib SHARED
-#     mlc_create_chat_module.cpp
-# )
-# 
-# target_include_directories(gemma_model_lib PRIVATE
-#     ${CMAKE_CURRENT_SOURCE_DIR}/include
-# )
-# 
-# target_link_libraries(gemma_model_lib
-#     ${log-lib}
-#     android
-#     tvm_runtime
-#     tvm
-# )
-# 
-# set_target_properties(gemma_model_lib PROPERTIES 
-#     OUTPUT_NAME "gemma-2-2b-it-q4f16_1"
-#     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/model_lib"
-# )
-
-# Import the Gemma library
-add_library(gemma-2-2b-it-q4f16_1 SHARED IMPORTED)
-set_target_properties(gemma-2-2b-it-q4f16_1 PROPERTIES 
-    IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/arm64-v8a/libgemma-2-2b-it-q4f16_1.so
-)
-
 # Add our JNI wrapper library for the Gemma model
 add_library(mlc_jni_wrapper SHARED
     mlc_jni_wrapper.cpp
@@ -106,13 +78,9 @@ target_include_directories(mlc_jni_wrapper PRIVATE
 )
 
 # Link the JNI wrapper with Android log and main libraries
-# Note: We're using dynamic loading (dlopen/dlsym) for Gemma library,
-# so we don't need to link against it directly
+# We use dynamic loading (dlopen/dlsym) for the Gemma library
 target_link_libraries(mlc_jni_wrapper
     ${log-lib}
     android
     dl  # Add the dynamic loading library
 )
-
-# Note: No longer importing or linking against the Gemma library
-# since we're implementing the functions directly in the wrapper
