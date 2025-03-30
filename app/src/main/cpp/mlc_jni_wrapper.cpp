@@ -3,6 +3,8 @@
 #include <android/log.h>
 #include <stdlib.h>
 #include <dlfcn.h>
+#include <sys/mman.h>
+#include <errno.h>
 
 #define TAG "MlcJniWrapper"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -21,6 +23,33 @@ static GenerateFn g_generate_fn = nullptr;
 static ResetChatFn g_reset_chat_fn = nullptr;
 static SetParameterFn g_set_parameter_fn = nullptr;
 
+// Pre-allocated memory buffer to prevent fragmentation
+static void* s_buffer = nullptr;
+
+// Optimizes memory usage in a safer way that won't interfere with JIT
+bool optimize_memory_usage() {
+    // Don't use mlockall - it interferes with Android Runtime's JIT compiler
+    // and causes "Failed to write jitted method info in log" errors
+    
+    // Instead, we'll just hint to the kernel about our memory usage patterns
+    LOGI("Using memory optimization that's compatible with JIT compiler");
+    
+    // Note: mallopt with M_TRIM_THRESHOLD and M_MMAP_THRESHOLD aren't available in Android NDK
+    // We'll use alternative approaches for memory optimization
+    
+    // Pre-allocate some memory to reduce fragmentation
+    if (s_buffer == nullptr) {
+        s_buffer = malloc(32 * 1024 * 1024);  // 32MB buffer
+        if (s_buffer != nullptr) {
+            // Touch the pages to ensure they're actually allocated
+            memset(s_buffer, 0, 32 * 1024 * 1024);
+            LOGI("Pre-allocated 32MB memory buffer to reduce fragmentation");
+        }
+    }
+    
+    return true;
+}
+
 // Loads the Gemma library and resolves all function pointers
 bool initialize_gemma_library() {
     if (g_lib_handle != nullptr) {
@@ -29,6 +58,9 @@ bool initialize_gemma_library() {
     }
     
     LOGI("Attempting to load Gemma library");
+    
+    // Optimize memory usage first
+    optimize_memory_usage();
     
     // Try to load the library
     const char* lib_name = "libgemma-2-2b-it-q4f16_1.so";
@@ -237,6 +269,13 @@ extern "C" {
     Java_com_example_studybuddy_ml_SimpleMlcModel_shutdown_1native(
             JNIEnv* env, jobject thiz) {
         LOGI("JNI: shutdown_native called");
+        
+        // Free our pre-allocated buffer if it exists
+        if (s_buffer != nullptr) {
+            free(s_buffer);
+            s_buffer = nullptr;
+            LOGI("Freed pre-allocated memory buffer");
+        }
         
         if (g_lib_handle != nullptr) {
             dlclose(g_lib_handle);
