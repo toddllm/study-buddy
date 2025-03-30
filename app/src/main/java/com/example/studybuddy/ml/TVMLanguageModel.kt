@@ -134,4 +134,19 @@ class TVMLanguageModel(context: Context) : LanguageModel(context) {
             // Do nothing if not initialized
         }
     }
+    
+    override suspend fun reset() {
+        if (isInitialized) {
+            try {
+                bridge.resetChat()
+                Log.d(tag, "Chat reset successfully")
+            } catch (e: Exception) {
+                Log.e(tag, "Error resetting chat", e)
+            }
+        }
+    }
+    
+    override fun getModelInfo(): String {
+        return "Gemma 2B-IT: A lightweight, efficient large language model optimized for mobile devices."
+    }
 } 

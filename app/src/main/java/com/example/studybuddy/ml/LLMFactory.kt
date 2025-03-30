@@ -16,10 +16,10 @@ class LLMFactory {
          */
         fun createLLM(context: Context): LanguageModel {
             try {
-                Log.d(TAG, "Creating MLC-LLM language model")
-                return MlcLanguageModel(context)
+                Log.d(TAG, "Creating SimpleMlcModel language model")
+                return SimpleMlcModel(context)
             } catch (e: Exception) {
-                val errorMsg = "Failed to create MLC-LLM model: ${e.message}"
+                val errorMsg = "Failed to create SimpleMlcModel: ${e.message}"
                 Log.e(TAG, errorMsg, e)
                 throw RuntimeException(errorMsg, e)
             }
@@ -44,6 +44,15 @@ class ErrorLanguageModel(context: Context, private val errorMessage: String) : L
     
     override fun streamText(prompt: String, onToken: (String) -> Unit, onError: (String) -> Unit) {
         onError("ERROR: $errorMessage")
+    }
+    
+    override suspend fun reset() {
+        // Nothing to reset
+        Log.d("ErrorLanguageModel", "Reset called, but nothing to reset")
+    }
+    
+    override fun getModelInfo(): String {
+        return "Error Model: $errorMessage"
     }
     
     override suspend fun shutdown() {

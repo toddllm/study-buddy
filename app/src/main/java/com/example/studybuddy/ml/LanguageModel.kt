@@ -1,8 +1,8 @@
 package com.example.studybuddy.ml
 
 import android.content.Context
-import androidx.compose.runtime.State
-import androidx.compose.runtime.mutableStateOf
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlin.properties.Delegates
 
 /**
@@ -11,11 +11,11 @@ import kotlin.properties.Delegates
 abstract class LanguageModel(protected val context: Context) {
     
     // State variables for UI
-    protected val _initialized = mutableStateOf(false)
-    val initialized: State<Boolean> = _initialized
+    protected val _initialized = MutableStateFlow(false)
+    val initialized: StateFlow<Boolean> = _initialized
     
-    protected val _error = mutableStateOf<String?>(null)
-    val error: State<String?> = _error
+    protected val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error
     
     // Model configuration
     var temperature by Delegates.observable(0.7f) { _, _, newValue ->
@@ -42,6 +42,16 @@ abstract class LanguageModel(protected val context: Context) {
     abstract fun streamText(prompt: String, onToken: (String) -> Unit, onError: (String) -> Unit = {})
     
     /**
+     * Reset the chat history.
+     */
+    abstract suspend fun reset()
+    
+    /**
+     * Get information about the loaded model.
+     */
+    abstract fun getModelInfo(): String
+    
+    /**
      * Shut down the model and release resources.
      */
     abstract suspend fun shutdown()
@@ -49,14 +59,14 @@ abstract class LanguageModel(protected val context: Context) {
     /**
      * Handle temperature changes.
      */
-    protected open fun onTemperatureChanged(newValue: Float) {
+    public open fun onTemperatureChanged(newValue: Float) {
         // Default implementation does nothing
     }
     
     /**
      * Handle top-p changes.
      */
-    protected open fun onTopPChanged(newValue: Float) {
+    public open fun onTopPChanged(newValue: Float) {
         // Default implementation does nothing
     }
 } 
