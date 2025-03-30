@@ -145,39 +145,30 @@ class MlcLanguageModel(context: Context) : LanguageModel(context) {
                 // Check for key model files
                 val configFile = File(internalModelDir, "mlc-chat-config.json")
                 val tokenizerFile = File(internalModelDir, "tokenizer.model")
-                val modelLibDir = File(internalModelDir, "lib")
-                val modelLib = File(modelLibDir, "libgemma-2-2b-it-q4f16_1.so")
                 
-                // Copy model library from assets if it doesn't exist in internal storage
-                if (!modelLib.exists() || modelLib.length() == 0L) {
-                    Log.d(tag, "Model library not found in internal storage, attempting to copy from assets")
-                    try {
-                        // Ensure the lib directory exists
-                        modelLibDir.mkdirs()
-                        
-                        // Copy from assets
-                        val assetManager = context.assets
-                        val inputStream = assetManager.open("models/gemma2_2b_it/lib/libgemma-2-2b-it-q4f16_1.so")
-                        val outputStream = FileOutputStream(modelLib)
-                        
-                        // Copy the file
-                        val buffer = ByteArray(8192)
-                        var read: Int
-                        while (inputStream.read(buffer).also { read = it } != -1) {
-                            outputStream.write(buffer, 0, read)
+                // Try to directly load the library from the system path
+                val libName = "gemma-2-2b-it-q4f16_1"
+                var libraryLoaded = false
+                
+                try {
+                    Log.d(tag, "Attempting to load library directly: $libName")
+                    System.loadLibrary(libName)
+                    Log.d(tag, "Successfully loaded library using System.loadLibrary")
+                    libraryLoaded = true
+                } catch (e: UnsatisfiedLinkError) {
+                    Log.e(tag, "Failed to load library directly: ${e.message}")
+                    
+                    // Fall back to trying to load using the absolute path
+                    val nativeLibFile = File(context.applicationInfo.nativeLibraryDir, "lib${libName}.so")
+                    if (nativeLibFile.exists()) {
+                        try {
+                            Log.d(tag, "Loading library from absolute path: ${nativeLibFile.absolutePath}")
+                            System.load(nativeLibFile.absolutePath)
+                            Log.d(tag, "Successfully loaded library from absolute path")
+                            libraryLoaded = true
+                        } catch (e: UnsatisfiedLinkError) {
+                            Log.e(tag, "Failed to load library from absolute path: ${e.message}")
                         }
-                        
-                        // Close streams
-                        inputStream.close()
-                        outputStream.close()
-                        
-                        Log.d(tag, "Successfully copied model library from assets to internal storage")
-                    } catch (e: IOException) {
-                        val error = "FATAL ERROR: Could not copy model library from assets: ${e.message}"
-                        Log.e(tag, error, e)
-                        _error.value = error
-                        _initialized.value = false
-                        return@withContext
                     }
                 }
                 
@@ -189,8 +180,8 @@ class MlcLanguageModel(context: Context) : LanguageModel(context) {
                     return@withContext
                 }
                 
-                if (!modelLibDir.exists() || !modelLib.exists()) {
-                    val error = "FATAL ERROR: Model library not found at ${modelLib.absolutePath}"
+                if (!libraryLoaded) {
+                    val error = "FATAL ERROR: Could not load model library"
                     Log.e(tag, error)
                     _error.value = error
                     _initialized.value = false
@@ -198,18 +189,6 @@ class MlcLanguageModel(context: Context) : LanguageModel(context) {
                 }
                 
                 Log.d(tag, "Found model at ${internalModelDir.absolutePath}, beginning initialization")
-                
-                // Also make sure the model library is properly set as executable
-                try {
-                    if (modelLib.exists()) {
-                        val chmod = ProcessBuilder("chmod", "755", modelLib.absolutePath)
-                        chmod.start().waitFor()
-                        Log.d(tag, "Set execute permissions on model library")
-                    }
-                } catch (e: Exception) {
-                    Log.w(tag, "Could not set execute permissions on model library: ${e.message}")
-                    // Continue anyway, as this might not be necessary
-                }
                 
                 // Initialize the model using the MLC bridge
                 val result = bridge.initializeEngine(internalModelDir.absolutePath)
@@ -221,11 +200,6 @@ class MlcLanguageModel(context: Context) : LanguageModel(context) {
                     return@withContext
                 }
                 
-                // Set up model parameters
-                bridge.setTemperature(temperature)
-                bridge.setTopP(topP)
-                bridge.setMaxGenLen(1024) // Set a reasonable max length
-                
                 isInitialized = true
                 _initialized.value = true
                 _error.value = null
@@ -236,7 +210,7 @@ class MlcLanguageModel(context: Context) : LanguageModel(context) {
                 
                 Log.d(tag, "MlcLanguageModel initialized successfully")
             } catch (e: Exception) {
-                val error = "FATAL ERROR: Error initializing MlcLanguageModel: ${e.message}"
+                val error = "FATAL ERROR: ${e.message}"
                 Log.e(tag, error, e)
                 _error.value = error
                 _initialized.value = false

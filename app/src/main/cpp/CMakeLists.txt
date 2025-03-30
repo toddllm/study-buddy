@@ -66,3 +66,25 @@ target_link_libraries(mlc_llm_jni
     tvm
     mlc_llm
 )
+
+# COMMENTED OUT - We now build this manually with the script
+# instead of through CMake to avoid duplicate library issues
+# add_library(gemma_model_lib SHARED
+#     mlc_create_chat_module.cpp
+# )
+# 
+# target_include_directories(gemma_model_lib PRIVATE
+#     ${CMAKE_CURRENT_SOURCE_DIR}/include
+# )
+# 
+# target_link_libraries(gemma_model_lib
+#     ${log-lib}
+#     android
+#     tvm_runtime
+#     tvm
+# )
+# 
+# set_target_properties(gemma_model_lib PROPERTIES 
+#     OUTPUT_NAME "gemma-2-2b-it-q4f16_1"
+#     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/model_lib"
+# )

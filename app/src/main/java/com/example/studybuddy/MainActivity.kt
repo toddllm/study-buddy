@@ -20,6 +20,7 @@ import com.example.studybuddy.ui.ModelScreen
 import com.example.studybuddy.ui.theme.StudyBuddyTheme
 import androidx.activity.addCallback
 import androidx.multidex.MultiDex
+import java.io.File
 
 private const val TAG = "MainActivity"
 
@@ -35,7 +36,11 @@ class MainActivity : ComponentActivity() {
             finishAffinity()
         }
         
+        // Test loading the library directly
+        testLoadLibrary()
+        
         enableEdgeToEdge()
+        
         setContent {
             StudyBuddyTheme {
                 // State to track whether the download screen should be shown
@@ -60,6 +65,42 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+    
+    private fun testLoadLibrary() {
+        // Add library test code
+        val tag = "LibraryTest"
+        
+        try {
+            // Check the native library directory
+            val nativeLibDir = applicationInfo.nativeLibraryDir
+            val libraryName = "libgemma-2-2b-it-q4f16_1.so"
+            val libraryFile = File(nativeLibDir, libraryName)
+            
+            Log.d(tag, "Native lib directory: $nativeLibDir")
+            Log.d(tag, "Library exists: ${libraryFile.exists()}")
+            
+            if (libraryFile.exists()) {
+                // Try to load the library using System.load
+                try {
+                    System.load(libraryFile.absolutePath)
+                    Log.d(tag, "Successfully loaded library: ${libraryFile.absolutePath}")
+                } catch (e: UnsatisfiedLinkError) {
+                    Log.e(tag, "Failed to load library: ${e.message}")
+                }
+            }
+            
+            // Try to load using loadLibrary (which uses the LD_LIBRARY_PATH)
+            try {
+                System.loadLibrary("gemma-2-2b-it-q4f16_1")
+                Log.d(tag, "Successfully loaded library using loadLibrary")
+            } catch (e: UnsatisfiedLinkError) {
+                Log.e(tag, "Failed to load library using loadLibrary: ${e.message}")
+            }
+        } catch (e: Exception) {
+            Log.e(tag, "Error testing library: ${e.message}")
+            e.printStackTrace()
         }
     }
     

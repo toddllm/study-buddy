@@ -5,6 +5,7 @@
 #include <memory>
 #include <vector>
 #include <unordered_map>
+#include <dlfcn.h>
 
 // Include MLC-LLM headers
 #include <tvm/runtime/packed_func.h>
@@ -90,7 +91,7 @@ public:
                 LOGI("  Function %zu: %s", i, registry_names[i].c_str());
             }
             
-            // We specifically look for mlc.create_chat_module
+            // Try to use the TVM Registry approach first
             LOGI("Looking for function: mlc.create_chat_module");
             auto chat_create = tvm::runtime::Registry::Get("mlc.create_chat_module");
             
@@ -101,46 +102,131 @@ public:
             }
             
             if (chat_create == nullptr) {
-                LOGE("FATAL: Required chat module creation function not found in registry");
-                LOGE("Please make sure the model library implements one of: mlc.create_chat_module or mlc_create_chat_module");
-                return false;
-            }
-            
-            LOGI("Found required function: mlc.create_chat_module");
-            
-            // Create the chat module by passing the model directory
-            try {
-                module_ = (*chat_create)(model_dir);
-                LOGI("Created chat module");
-            } catch (const std::exception& e) {
-                LOGE("FATAL: Failed to create chat module: %s", e.what());
-                return false;
-            }
-            
-            // Get the necessary functions from the module
-            model_load_ = module_.GetFunction("load_model");
-            generate_ = module_.GetFunction("generate");
-            reset_chat_ = module_.GetFunction("reset_chat");
-            set_param_ = module_.GetFunction("set_parameter");
-            
-            // Check if we got all required functions
-            if (model_load_ == nullptr || generate_ == nullptr || 
-                reset_chat_ == nullptr || set_param_ == nullptr) {
-                LOGE("FATAL: Failed to get required functions from the module");
+                // TVM registry approach failed, try direct loading with dlopen/dlsym
+                LOGI("TVM registry method failed, trying direct library loading: %s", model_lib_path.c_str());
                 
-                // Log which functions are missing
-                LOGE("Missing functions:");
-                if (model_load_ == nullptr) LOGE("  load_model");
-                if (generate_ == nullptr) LOGE("  generate");
-                if (reset_chat_ == nullptr) LOGE("  reset_chat");
-                if (set_param_ == nullptr) LOGE("  set_parameter");
+                // Open the library
+                void* lib_handle = dlopen(model_lib_path.c_str(), RTLD_LAZY);
+                if (!lib_handle) {
+                    LOGE("FATAL: Failed to open model library with dlopen: %s", dlerror());
+                    return false;
+                }
                 
-                return false;
+                // Clear any existing error
+                dlerror();
+                
+                // Try to find the mlc_create_chat_module function
+                typedef void* (*CreateChatModuleFunc)(const char*);
+                CreateChatModuleFunc create_func = (CreateChatModuleFunc)dlsym(lib_handle, "mlc_create_chat_module");
+                const char* dlsym_error = dlerror();
+                
+                if (dlsym_error) {
+                    LOGE("FATAL: Could not find mlc_create_chat_module symbol: %s", dlsym_error);
+                    dlclose(lib_handle);
+                    
+                    LOGE("FATAL: Required chat module creation function not found in registry");
+                    LOGE("Please make sure the model library implements one of: mlc.create_chat_module or mlc_create_chat_module");
+                    return false;
+                }
+                
+                // Call the function to create the module
+                void* module_ptr = create_func(model_dir.c_str());
+                if (!module_ptr) {
+                    LOGE("FATAL: Create chat module function returned NULL");
+                    dlclose(lib_handle);
+                    return false;
+                }
+                
+                LOGI("Successfully created chat module using direct dlsym approach");
+                
+                // Now load the other functions
+                typedef void (*LoadModelFunc)();
+                typedef char* (*GenerateFunc)(const char*);
+                typedef void (*ResetChatFunc)();
+                typedef void (*SetParamFunc)(const char*, float);
+                
+                LoadModelFunc load_model_func = (LoadModelFunc)dlsym(lib_handle, "load_model");
+                GenerateFunc generate_func = (GenerateFunc)dlsym(lib_handle, "generate");
+                ResetChatFunc reset_chat_func = (ResetChatFunc)dlsym(lib_handle, "reset_chat");
+                SetParamFunc set_param_func = (SetParamFunc)dlsym(lib_handle, "set_parameter");
+                
+                // Check that all functions were found
+                if (!load_model_func || !generate_func || !reset_chat_func || !set_param_func) {
+                    LOGE("FATAL: Failed to find all required functions");
+                    if (!load_model_func) LOGE("Missing: load_model");
+                    if (!generate_func) LOGE("Missing: generate");
+                    if (!reset_chat_func) LOGE("Missing: reset_chat");
+                    if (!set_param_func) LOGE("Missing: set_parameter");
+                    dlclose(lib_handle);
+                    return false;
+                }
+                
+                // Create wrapper functions that call the loaded functions
+                model_load_ = tvm::runtime::PackedFunc([load_model_func](tvm::runtime::TVMArgs args, tvm::runtime::TVMRetValue* rv) {
+                    load_model_func();
+                });
+                
+                generate_ = tvm::runtime::PackedFunc([generate_func](tvm::runtime::TVMArgs args, tvm::runtime::TVMRetValue* rv) {
+                    std::string prompt = args[0];
+                    char* result = generate_func(prompt.c_str());
+                    std::string result_str(result);
+                    free(result); // Assume the function allocates memory we need to free
+                    *rv = result_str;
+                });
+                
+                reset_chat_ = tvm::runtime::PackedFunc([reset_chat_func](tvm::runtime::TVMArgs args, tvm::runtime::TVMRetValue* rv) {
+                    reset_chat_func();
+                });
+                
+                set_param_ = tvm::runtime::PackedFunc([set_param_func](tvm::runtime::TVMArgs args, tvm::runtime::TVMRetValue* rv) {
+                    std::string key = args[0];
+                    float value = static_cast<float>(static_cast<double>(args[1]));
+                    set_param_func(key.c_str(), value);
+                });
+                
+                // Create a fake module since we're not using TVM's module system
+                module_ = tvm::runtime::Module(nullptr);
+                
+                // Call load_model to initialize
+                load_model_func();
+                LOGI("Model loaded successfully using direct function calls");
+            } else {
+                LOGI("Found required function: mlc.create_chat_module");
+                
+                // Create the chat module by passing the model directory
+                try {
+                    module_ = (*chat_create)(model_dir);
+                    LOGI("Created chat module");
+                } catch (const std::exception& e) {
+                    LOGE("FATAL: Failed to create chat module: %s", e.what());
+                    return false;
+                }
+                
+                // Get the necessary functions from the module
+                model_load_ = module_.GetFunction("load_model");
+                generate_ = module_.GetFunction("generate");
+                reset_chat_ = module_.GetFunction("reset_chat");
+                set_param_ = module_.GetFunction("set_parameter");
+                
+                // Check if we got all required functions
+                if (model_load_ == nullptr || generate_ == nullptr || 
+                    reset_chat_ == nullptr || set_param_ == nullptr) {
+                    LOGE("FATAL: Failed to get required functions from the module");
+                    
+                    // Log which functions are missing
+                    LOGE("Missing functions:");
+                    if (model_load_ == nullptr) LOGE("  load_model");
+                    if (generate_ == nullptr) LOGE("  generate");
+                    if (reset_chat_ == nullptr) LOGE("  reset_chat");
+                    if (set_param_ == nullptr) LOGE("  set_parameter");
+                    
+                    return false;
+                }
+                
+                // Load the model
+                model_load_();
+                LOGI("Model loaded successfully");
             }
-            
-            // Load the model
-            model_load_();
-            LOGI("Model loaded successfully");
             
             // Configure generation parameters
             configure_chat();
