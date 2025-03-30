@@ -6,24 +6,26 @@
 #include <vector>
 #include <unordered_map>
 
-// When actually integrating with MLC-LLM, you would include these headers
-// #include <tvm/runtime/packed_func.h>
-// #include <tvm/runtime/registry.h>
-// #include <tvm/runtime/module.h>
-// #include <mlc/llm/chat_module.h>
+// Include MLC-LLM headers
+#include <tvm/runtime/packed_func.h>
+#include <tvm/runtime/registry.h>
+#include <tvm/runtime/module.h>
+#include <tvm/runtime/device_api.h>
 
 #define LOGI(...) ((void)__android_log_print(ANDROID_LOG_INFO, "REAL_MLC_LLM", __VA_ARGS__))
 #define LOGE(...) ((void)__android_log_print(ANDROID_LOG_ERROR, "REAL_MLC_LLM", __VA_ARGS__))
 
 /**
- * This is a template for integrating with the real MLC-LLM library.
- * In the actual implementation, you would replace placeholder code with calls to MLC-LLM APIs.
+ * This is the real implementation of the MLC-LLM engine.
  */
 class RealMlcEngine {
 private:
-    // In a real implementation, these would be actual MLC-LLM objects
-    // tvm::runtime::Module tvm_module;
-    // mlc::llm::ChatModule chat_module;
+    // TVM and MLC-LLM objects
+    tvm::runtime::Module module_{nullptr};
+    tvm::runtime::PackedFunc model_load_{nullptr};
+    tvm::runtime::PackedFunc generate_{nullptr};
+    tvm::runtime::PackedFunc reset_chat_{nullptr};
+    tvm::runtime::PackedFunc set_param_{nullptr};
     
     bool initialized = false;
     std::string model_path;
@@ -38,10 +40,15 @@ private:
         LOGI("Configuring chat with temperature=%.2f, top_p=%.2f, max_gen_len=%d", 
              temperature, top_p, max_gen_len);
         
-        // In a real implementation, you would call:
-        // chat_module->SetParameter("temperature", temperature);
-        // chat_module->SetParameter("top_p", top_p);
-        // chat_module->SetParameter("max_gen_len", max_gen_len);
+        if (set_param_ != nullptr) {
+            try {
+                set_param_("temperature", temperature);
+                set_param_("top_p", top_p);
+                set_param_("max_gen_len", max_gen_len);
+            } catch (const std::exception& e) {
+                LOGE("Error setting parameters: %s", e.what());
+            }
+        }
     }
     
 public:
@@ -65,17 +72,77 @@ public:
                 return false;
             }
             
-            // In a real implementation, you would:
-            // 1. Load the TVM runtime module
-            // auto runtime_module = tvm::runtime::Module::LoadFromFile(model_dir + "/lib/libgemma-2b.so");
+            // Check if model lib exists - REQUIRE it to exist
+            std::string model_lib_path = model_dir + "/lib/libgemma-2-2b-it-q4f16_1.so";
+            std::ifstream modelLib(model_lib_path);
+            if (!modelLib.good()) {
+                LOGE("FATAL: Model library not found at %s", model_lib_path.c_str());
+                LOGE("The model library must exist at this exact path");
+                return false;
+            }
             
-            // 2. Create a chat module using the runtime
-            // chat_module = mlc::llm::ChatModule(runtime_module);
+            // List all available TVM registry functions for debugging
+            auto registry_names = tvm::runtime::Registry::ListNames();
+            LOGI("Available TVM registry functions (%lu):", registry_names.size());
             
-            // 3. Initialize with model parameters
-            // chat_module->Initialize(model_dir);
+            // Log all registry functions to help with debugging
+            for (size_t i = 0; i < registry_names.size(); ++i) {
+                LOGI("  Function %zu: %s", i, registry_names[i].c_str());
+            }
             
-            // 4. Configure generation parameters
+            // We specifically look for mlc.create_chat_module
+            LOGI("Looking for function: mlc.create_chat_module");
+            auto chat_create = tvm::runtime::Registry::Get("mlc.create_chat_module");
+            
+            // Also try alternative module names based on the model library path
+            if (chat_create == nullptr) {
+                LOGI("Function not found, trying alternative: mlc_create_chat_module");
+                chat_create = tvm::runtime::Registry::Get("mlc_create_chat_module");
+            }
+            
+            if (chat_create == nullptr) {
+                LOGE("FATAL: Required chat module creation function not found in registry");
+                LOGE("Please make sure the model library implements one of: mlc.create_chat_module or mlc_create_chat_module");
+                return false;
+            }
+            
+            LOGI("Found required function: mlc.create_chat_module");
+            
+            // Create the chat module by passing the model directory
+            try {
+                module_ = (*chat_create)(model_dir);
+                LOGI("Created chat module");
+            } catch (const std::exception& e) {
+                LOGE("FATAL: Failed to create chat module: %s", e.what());
+                return false;
+            }
+            
+            // Get the necessary functions from the module
+            model_load_ = module_.GetFunction("load_model");
+            generate_ = module_.GetFunction("generate");
+            reset_chat_ = module_.GetFunction("reset_chat");
+            set_param_ = module_.GetFunction("set_parameter");
+            
+            // Check if we got all required functions
+            if (model_load_ == nullptr || generate_ == nullptr || 
+                reset_chat_ == nullptr || set_param_ == nullptr) {
+                LOGE("FATAL: Failed to get required functions from the module");
+                
+                // Log which functions are missing
+                LOGE("Missing functions:");
+                if (model_load_ == nullptr) LOGE("  load_model");
+                if (generate_ == nullptr) LOGE("  generate");
+                if (reset_chat_ == nullptr) LOGE("  reset_chat");
+                if (set_param_ == nullptr) LOGE("  set_parameter");
+                
+                return false;
+            }
+            
+            // Load the model
+            model_load_();
+            LOGI("Model loaded successfully");
+            
+            // Configure generation parameters
             configure_chat();
             
             initialized = true;
@@ -83,38 +150,69 @@ public:
             return true;
         }
         catch (const std::exception& e) {
-            LOGE("Error initializing MLC-LLM: %s", e.what());
+            LOGE("FATAL: Error initializing MLC-LLM: %s", e.what());
             return false;
         }
     }
     
     std::string generate_response(const std::string& prompt) {
         if (!initialized) {
-            LOGE("MLC-LLM engine not initialized");
-            return "Error: MLC-LLM engine not initialized";
+            LOGE("FATAL: MLC-LLM engine not initialized");
+            return "FATAL ERROR: MLC-LLM engine not initialized. The initialization process failed.";
         }
         
         try {
             LOGI("Generating response for prompt: %s", prompt.c_str());
             
-            // In a real implementation, you would:
-            // 1. Prepare the prompt
-            // chat_module->ResetChat();
-            // 
-            // 2. Generate the response
-            // std::string response = chat_module->Generate(prompt);
+            // First reset the chat to clear any previous conversation
+            reset_chat_();
             
-            // Placeholder implementation
-            std::string response = "This is a simulated response from the real MLC-LLM implementation. "
-                                  "In the actual integration, this would generate a response using the "
-                                  "Gemma 2 model. Your prompt was: \"" + prompt + "\"";
+            // Generate the response
+            std::string response = generate_(prompt);
             
             LOGI("Generated response: %s", response.c_str());
             return response;
         }
         catch (const std::exception& e) {
-            LOGE("Error generating response: %s", e.what());
-            return "Error generating response: " + std::string(e.what());
+            LOGE("FATAL: Error generating response: %s", e.what());
+            return "FATAL ERROR: " + std::string(e.what());
+        }
+    }
+    
+    // Define a callback function for streaming tokens
+    void stream_response(const std::string& prompt, std::function<void(std::string)> callback) {
+        if (!initialized) {
+            LOGE("MLC-LLM engine not initialized");
+            callback("Error: MLC-LLM engine not initialized");
+            return;
+        }
+        
+        try {
+            LOGI("Streaming response for prompt: %s", prompt.c_str());
+            
+            // Reset the chat
+            reset_chat_();
+            
+            // Get the stream function
+            auto stream_func = module_.GetFunction("stream_chat");
+            if (stream_func == nullptr) {
+                LOGE("Stream function not found");
+                callback("Error: Streaming not supported");
+                return;
+            }
+            
+            // Create a TVM callback to pass to the stream function
+            auto tvm_callback = tvm::runtime::TypedPackedFunc<void(std::string)>(
+                [callback](std::string token) {
+                    callback(token);
+                });
+            
+            // Call the stream function with the prompt and callback
+            stream_func(prompt, tvm_callback);
+        }
+        catch (const std::exception& e) {
+            LOGE("Error streaming response: %s", e.what());
+            callback("Error streaming response: " + std::string(e.what()));
         }
     }
     
@@ -126,8 +224,7 @@ public:
         
         try {
             LOGI("Resetting chat");
-            // In a real implementation:
-            // chat_module->ResetChat();
+            reset_chat_();
         }
         catch (const std::exception& e) {
             LOGE("Error resetting chat: %s", e.what());
@@ -164,9 +261,15 @@ public:
     void close() {
         if (initialized) {
             LOGI("Closing MLC-LLM engine");
-            // In a real implementation:
-            // chat_module = nullptr;
-            // tvm_module = nullptr;
+            // Reset module references to release resources
+            model_load_ = tvm::runtime::PackedFunc(nullptr);
+            generate_ = tvm::runtime::PackedFunc(nullptr);
+            reset_chat_ = tvm::runtime::PackedFunc(nullptr);
+            set_param_ = tvm::runtime::PackedFunc(nullptr);
+            
+            // Create an empty module to replace the current one
+            module_ = tvm::runtime::Module(nullptr);
+            
             initialized = false;
         }
     }
@@ -208,7 +311,7 @@ Java_com_example_studybuddy_ml_MlcLlmBridge_initializeEngine(
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_example_studybuddy_ml_MlcLlmBridge_chat(
+Java_com_example_studybuddy_ml_MlcLlmBridge_generateResponse(
         JNIEnv* env,
         jobject /* this */,
         jstring jPrompt) {
@@ -231,10 +334,47 @@ Java_com_example_studybuddy_ml_MlcLlmBridge_chat(
         return env->NewStringUTF(response.c_str());
     } 
     catch (const std::exception& e) {
-        LOGE("Exception in chat: %s", e.what());
+        LOGE("Exception in generateResponse: %s", e.what());
         env->ReleaseStringUTFChars(jPrompt, prompt);
         return env->NewStringUTF(("Error: " + std::string(e.what())).c_str());
     }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_studybuddy_ml_MlcLlmBridge_streamResponse(
+        JNIEnv* env,
+        jobject thiz,
+        jstring jPrompt,
+        jobject jCallback) {
+    
+    if (!g_mlc_engine) {
+        LOGE("Engine not initialized");
+        return;
+    }
+    
+    // Get the callback interface method
+    jclass callbackClass = env->GetObjectClass(jCallback);
+    jmethodID callbackMethod = env->GetMethodID(callbackClass, "invoke", "(Ljava/lang/Object;)Ljava/lang/Object;");
+    
+    if (callbackMethod == nullptr) {
+        LOGE("Failed to find callback method");
+        return;
+    }
+    
+    const char* prompt = env->GetStringUTFChars(jPrompt, nullptr);
+    
+    // Create a callback function to pass to the C++ stream function
+    auto callback = [env, jCallback, callbackMethod](const std::string& token) {
+        jstring jToken = env->NewStringUTF(token.c_str());
+        env->CallObjectMethod(jCallback, callbackMethod, jToken);
+        env->DeleteLocalRef(jToken);
+    };
+    
+    // Stream the response
+    g_mlc_engine->stream_response(prompt, callback);
+    
+    // Clean up
+    env->ReleaseStringUTFChars(jPrompt, prompt);
 }
 
 JNIEXPORT void JNICALL
@@ -317,14 +457,19 @@ Java_com_example_studybuddy_ml_MlcLlmBridge_closeEngine(
         JNIEnv* env,
         jobject /* this */) {
     
-    LOGI("Closing MLC-LLM engine");
+    if (!g_mlc_engine) {
+        LOGE("Engine not initialized");
+        return;
+    }
     
     try {
+        g_mlc_engine->close();
         g_mlc_engine.reset();
+        LOGI("Engine closed successfully");
     } 
     catch (const std::exception& e) {
         LOGE("Exception in closeEngine: %s", e.what());
     }
 }
 
-} // extern "C" 
+} 

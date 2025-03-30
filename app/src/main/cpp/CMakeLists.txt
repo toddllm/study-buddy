@@ -48,9 +48,9 @@ target_link_libraries(tvm_bridge
 #     ${log-lib}
 # )
 
-# Add the mlc_llm_jni library using our implementation
+# Use the real MLC-LLM implementation
 add_library(mlc_llm_jni SHARED
-    mlc_jni/mlc_llm_jni.cpp
+    real_mlc_llm_jni.cpp
 )
 
 # Include headers for the MLC JNI library

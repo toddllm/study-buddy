@@ -1,33 +1,32 @@
 package com.example.studybuddy.ui
 
-import android.content.Context
 import android.util.Log
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -41,20 +40,26 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import com.example.studybuddy.ml.MlcLanguageModel
 import com.example.studybuddy.ml.ModelDownloadService
+import com.example.studybuddy.ui.theme.StudyBuddyTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.math.roundToInt
 
 private const val TAG = "ModelDownloadScreen"
 
+/**
+ * Model download screen for LLM models
+ */
 @Composable
 fun ModelDownloadScreen(
     onDownloadComplete: () -> Unit,
@@ -68,6 +73,8 @@ fun ModelDownloadScreen(
     var downloadStatus by remember { mutableStateOf("") }
     var showInfoDialog by remember { mutableStateOf(false) }
     var modelInfo by remember { mutableStateOf("") }
+    var showErrorDialog by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf("") }
     
     // Create model instances
     val mlcModel = remember { MlcLanguageModel(context) }
@@ -83,9 +90,26 @@ fun ModelDownloadScreen(
                 val filesAvailable = mlcModel.areModelFilesAvailable()
                 if (filesAvailable) {
                     downloadStatus = "Model files already available"
-                    modelInfo = mlcModel.getModelInfo()
+                    
+                    // Try to initialize model if files are available
+                    try {
+                        // Call initialize and get the Boolean result
+                        val modelInitialized = mlcModel.initialize(null)
+                        
+                        if (modelInitialized) {
+                            // Model is ready to use, move to main screen
+                            withContext(Dispatchers.Main) {
+                                onDownloadComplete()
+                            }
+                        } else {
+                            downloadStatus = "Model files found but failed to initialize"
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error initializing model", e)
+                        downloadStatus = "Error initializing model: ${e.message}"
+                    }
                 } else {
-                    downloadStatus = "Model files not found"
+                    downloadStatus = "Model files not found. Please download the model."
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error checking model files", e)
@@ -113,6 +137,78 @@ fun ModelDownloadScreen(
         )
     }
     
+    // Show error dialog
+    if (showErrorDialog) {
+        AlertDialog(
+            onDismissRequest = { showErrorDialog = false },
+            title = { Text("Error") },
+            text = { 
+                Text(
+                    text = errorMessage,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showErrorDialog = false }) {
+                    Text("OK")
+                }
+            }
+        )
+    }
+    
+    // Show progress dialog during download
+    if (isDownloading) {
+        Dialog(onDismissRequest = { /* Non-dismissible */ }) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surface,
+                shadowElevation = 8.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(24.dp)
+                        .fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Downloading Model",
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    LinearProgressIndicator(
+                        progress = downloadProgress,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Text(
+                        text = "Progress: ${(downloadProgress * 100).toInt()}%",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    Text(
+                        text = downloadStatus,
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center
+                    )
+                    
+                    if (downloadProgress == 1f) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        Button(onClick = { isDownloading = false }) {
+                            Text("Close")
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
     // Main UI
     Column(
         modifier = modifier
@@ -123,7 +219,7 @@ fun ModelDownloadScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Gemma 2 Model Download",
+            text = "Gemma 2 Model Setup",
             style = MaterialTheme.typography.headlineMedium
         )
         
@@ -157,65 +253,41 @@ fun ModelDownloadScreen(
                     label = { Text("Hugging Face Token (optional)") },
                     modifier = Modifier.fillMaxWidth(),
                     visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    supportingText = { Text("Required if downloading gated models") }
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Password),
+                    supportingText = { Text("Required for downloading gated models") }
                 )
                 
                 Spacer(modifier = Modifier.height(16.dp))
                 
-                Box(
+                Text(
+                    text = downloadStatus,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontStyle = if (downloadStatus.contains("Error") || downloadStatus.contains("failed")) 
+                                    FontStyle.Italic else FontStyle.Normal,
+                    color = if (downloadStatus.contains("Error") || downloadStatus.contains("failed")) 
+                               MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                )
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    contentAlignment = Alignment.Center
+                    horizontalArrangement = Arrangement.End
                 ) {
-                    if (isDownloading) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            // Progress indicator
-                            if (downloadProgress > 0) {
-                                // Show deterministic progress
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    LinearProgressIndicator(
-                                        progress = downloadProgress,
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                    
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    
-                                    Text(
-                                        text = "${(downloadProgress * 100).roundToInt()}%",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        textAlign = TextAlign.Center
-                                    )
-                                }
+                    Button(
+                        onClick = { 
+                            if (downloadStatus.startsWith("Model files already available")) {
+                                // Skip download and proceed
+                                onDownloadComplete()
                             } else {
-                                // Show indeterminate progress initially
-                                CircularProgressIndicator()
-                            }
-                            
-                            Spacer(modifier = Modifier.height(8.dp))
-                            
-                            Text(
-                                text = if (downloadProgress > 0) 
-                                    "Downloading: ${(downloadProgress * 100).roundToInt()}% complete" 
-                                else 
-                                    "Preparing download...",
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        }
-                    } else {
-                        Button(
-                            onClick = {
-                                isDownloading = true
-                                downloadStatus = "Starting download..."
-                                
                                 coroutineScope.launch {
-                                    // Set Hugging Face token if provided
-                                    val token = hfToken.takeIf { it.isNotEmpty() }
-                                    token?.let { downloadService.setHuggingFaceToken(it) }
+                                    isDownloading = true
+                                    downloadStatus = "Preparing to download model..."
+                                    
+                                    // Set token if provided
+                                    if (hfToken.isNotEmpty()) {
+                                        downloadService.setHuggingFaceToken(hfToken)
+                                    }
                                     
                                     try {
                                         // Download model files
@@ -224,73 +296,60 @@ fun ModelDownloadScreen(
                                         }
                                         
                                         if (modelDir != null) {
+                                            downloadStatus = "Download complete. Initializing model..."
+                                            
                                             // Try to initialize the model with the downloaded files
                                             val initialized = withContext(Dispatchers.IO) {
-                                                mlcModel.initialize(token)
+                                                mlcModel.initialize(hfToken)
                                             }
                                             
                                             if (initialized) {
                                                 downloadStatus = "Model downloaded and initialized successfully!"
                                                 modelInfo = mlcModel.getModelInfo()
-                                                Toast.makeText(
-                                                    context, 
-                                                    "Model downloaded and ready to use!", 
-                                                    Toast.LENGTH_LONG
-                                                ).show()
-                                                
-                                                // Navigate back
-                                                onDownloadComplete()
+                                                withContext(Dispatchers.Main) {
+                                                    Toast.makeText(
+                                                        context, 
+                                                        "Model downloaded and ready to use!", 
+                                                        Toast.LENGTH_LONG
+                                                    ).show()
+                                                    
+                                                    // Navigate to main screen
+                                                    onDownloadComplete()
+                                                }
                                             } else {
                                                 downloadStatus = "Model downloaded but failed to initialize"
+                                                errorMessage = "The model was downloaded but couldn't be initialized properly."
+                                                showErrorDialog = true
                                             }
                                         } else {
                                             downloadStatus = "Failed to download model files"
+                                            errorMessage = "Failed to download model files. Check your internet connection and Hugging Face token (if required)."
+                                            showErrorDialog = true
                                         }
                                     } catch (e: Exception) {
-                                        Log.e(TAG, "Error downloading model", e)
+                                        Log.e(TAG, "Error during model download/init", e)
                                         downloadStatus = "Error: ${e.message}"
+                                        errorMessage = "An error occurred: ${e.message}"
+                                        showErrorDialog = true
                                     } finally {
                                         isDownloading = false
                                     }
                                 }
-                            },
-                            enabled = !isDownloading,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Create,
-                                contentDescription = null,
-                                modifier = Modifier.padding(end = 8.dp)
-                            )
+                            }
+                        },
+                        enabled = !isDownloading
+                    ) {
+                        if (downloadStatus.startsWith("Model files already available")) {
+                            Text("Continue")
+                        } else {
                             Text("Download Model")
                         }
                     }
-                }
-                
-                if (downloadStatus.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = downloadStatus,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (downloadStatus.startsWith("Error")) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        }
-                    )
-                }
-                
-                if (modelInfo.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Box(
-                        modifier = Modifier.fillMaxWidth(),
-                        contentAlignment = Alignment.CenterEnd
-                    ) {
+                    
+                    if (modelInfo.isNotEmpty()) {
+                        Spacer(modifier = Modifier.width(8.dp))
                         IconButton(onClick = { showInfoDialog = true }) {
-                            Icon(
-                                imageVector = Icons.Default.Info,
-                                contentDescription = "Model Info"
-                            )
+                            Icon(Icons.Default.Info, contentDescription = "Model Info")
                         }
                     }
                 }
@@ -299,11 +358,48 @@ fun ModelDownloadScreen(
         
         Spacer(modifier = Modifier.height(16.dp))
         
-        TextButton(
-            onClick = { onDownloadComplete() },
-            enabled = !isDownloading
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+            )
         ) {
-            Text("Skip Download")
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Text(
+                    text = "About Gemma 2",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Text(
+                    "Gemma 2 is Google's lightweight, state-of-the-art open LLM. " +
+                    "The 2B-parameter model is optimized for mobile devices and " +
+                    "provides high-quality results for educational purposes.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Text(
+                    "The model can answer questions, help with homework, generate creative content, " +
+                    "and engage in helpful conversations without requiring an internet connection.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
         }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun ModelDownloadScreenPreview() {
+    StudyBuddyTheme {
+        ModelDownloadScreen(
+            onDownloadComplete = {}
+        )
     }
 } 

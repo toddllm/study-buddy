@@ -11,26 +11,17 @@ class LLMFactory {
         private const val TAG = "LLMFactory"
         
         /**
-         * Create an appropriate LLM instance based on available libraries
+         * Create an appropriate LLM instance based on available libraries.
+         * Prioritizes MLC-LLM and will fail if it cannot be initialized.
          */
         fun createLLM(context: Context): LanguageModel {
-            return try {
-                // Try to create an MLC-LLM based model first
-                Log.d(TAG, "Attempting to create MLC-LLM model")
-                MlcLanguageModel(context)
+            try {
+                Log.d(TAG, "Creating MLC-LLM language model")
+                return MlcLanguageModel(context)
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to create MLC-LLM model: ${e.message}")
-                
-                try {
-                    // Try TVM bridge as a fallback
-                    Log.d(TAG, "Attempting to create TVM bridge model")
-                    TVMLanguageModel(context)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to create TVM bridge model: ${e.message}")
-                    
-                    // Return a model that clearly indicates the error
-                    ErrorLanguageModel(context, e.message ?: "Unknown error initializing LLM")
-                }
+                val errorMsg = "Failed to create MLC-LLM model: ${e.message}"
+                Log.e(TAG, errorMsg, e)
+                throw RuntimeException(errorMsg, e)
             }
         }
     }

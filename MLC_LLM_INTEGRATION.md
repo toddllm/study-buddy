@@ -1,92 +1,55 @@
-# MLC-LLM Integration in StudyBuddy
-
-This document provides details on how StudyBuddy integrates the MLC-LLM framework for on-device inference.
+# MLC-LLM Integration in StudyBuddy Android App
 
 ## Overview
+This document outlines our efforts to integrate MLC-LLM with a strict no-fallback policy in the StudyBuddy Android application. The goal was to ensure that only the real on-device LLM is used, with proper error handling instead of silent fallbacks to other mechanisms.
 
-[MLC-LLM](https://github.com/mlc-ai/mlc-llm) is an open-source framework that enables the deployment of Large Language Models (LLMs) across diverse hardware backends and device targets, including Android devices. StudyBuddy uses MLC-LLM to run the Gemma 2B-IT model directly on-device.
+## Key Accomplishments
 
-## Key Components
+### 1. Strict Error Handling
+- Modified C++ JNI code to properly report errors without fallbacks
+- Updated Kotlin interface to propagate errors to the UI layer
+- Ensured clear feedback when model initialization fails
 
-### 1. Model Compilation
+### 2. Model File Structure
+Successfully created all necessary model files in the correct locations:
+- Configuration files (`mlc-chat-config.json`)
+- Tokenizer files (`tokenizer.json`)
+- Parameter shards (in `/params` directory)
+- Model libraries (shared objects)
 
-The Gemma 2B-IT model is compiled with TVM and MLC-LLM to optimize it for mobile devices. Key optimizations include:
+### 3. Library Integration
+- Implemented runtime copying of model libraries from assets to internal storage
+- Added proper file permissions handling
+- Created directory structure to match MLC-LLM expectations
 
-- Quantization to 4-bit for reduced memory footprint
-- TVM graph-level optimizations
-- Hardware-specific acceleration where available
-
-### 2. Native Libraries
-
-The integration relies on several native libraries:
-
-- `libtvm_runtime.so` - TVM runtime library
-- `libtvm.so` - Core TVM library
-- `libmlc_llm.so` - MLC-LLM implementation
-- `libmlc_llm_jni.so` - JNI bridge
-
-### 3. Model Directory Structure
-
-The model is stored in the app's assets directory with the following structure:
-
+## Remaining Issue
+Despite having all required files in place, model initialization fails with:
 ```
-app/src/main/assets/models/gemma2_2b_it/
-├── params/
-│   ├── params_shard_0.bin
-│   ├── params_shard_1.bin
-│   └── ...
-├── configs.json
-├── model.bin
-└── tokenizer.model
+FATAL: Required chat module creation function not found in registry
 ```
 
-### 4. Runtime Flow
+This confirms our strict error handling is working correctly. The model library (`libgemma-2-2b-it-q4f16_1.so`) exists but doesn't implement the required TVM registry functions.
 
-1. The model is loaded from assets into device storage
-2. MLC-LLM engine is initialized with the model path
-3. TVM runtime compiles and optimizes for the specific device
-4. Inference requests are processed through the JNI bridge
-5. Responses are streamed back to the UI
+## Technical Details
 
-## Implementation Details
+### Required Components for MLC-LLM
+1. **TVM Runtime**: Base framework for model execution
+2. **MLC-Chat module**: Implementation of the chat functionality
+3. **Model weights**: Quantized model parameters
+4. **TVM registry**: Required for function discovery between components
 
-### Model Configuration
+### Fix Requirements
+To properly resolve this issue, we would need:
+1. A correctly compiled MLC-LLM model library for Android with proper exports
+2. The exact TVM runtime version compatible with the model
+3. Proper integration with the TVM build system
 
-The model configuration is managed via JSON:
+Our attempts to create a dummy library with C++ didn't succeed because it requires deeper integration with the TVM runtime, which is non-trivial without access to the MLC-LLM build system.
 
-```json
-{
-  "model_type": "gemma",
-  "quantization": "q4f16_0",
-  "context_length": 8192,
-  "vocab_size": 256000,
-  "model_layer_count": 18
-}
-```
-
-### Performance Considerations
-
-- Model initialization may take several seconds
-- First inference typically takes longer than subsequent ones
-- Memory usage peaks during initialization
-- Battery consumption varies by device capability
-
-### Error Handling
-
-The integration includes robust error handling for:
-
-- Model loading failures
-- Out-of-memory conditions
-- Invalid inputs
-- Timeout conditions
-
-## Future Improvements
-
-1. Support for more models (Phi-2, Llama, etc.)
-2. Improved memory management
-3. Multi-language support
-4. More configuration options for inference
-5. Enhanced quantization strategies
+## Future Work
+- Obtain properly compiled MLC-LLM libraries for Android
+- Ensure compatibility between TVM runtime and model libraries
+- Consider alternative on-device inference solutions if MLC-LLM integration proves too complex
 
 ## Prerequisites
 

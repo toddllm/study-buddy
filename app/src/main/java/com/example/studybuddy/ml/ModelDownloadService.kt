@@ -20,7 +20,7 @@ import java.net.SocketTimeoutException
 import java.util.concurrent.TimeUnit
 
 /**
- * Service to download ML model files
+ * Service to download ML model files from Hugging Face
  */
 class ModelDownloadService(private val context: Context) {
     companion object {
@@ -37,9 +37,9 @@ class ModelDownloadService(private val context: Context) {
         private const val NDARRAY_CACHE_FILE = "ndarray-cache.json"
         
         // Constants for download directory
-        private const val DOWNLOAD_DIR = "mlc_models"
+        private const val DOWNLOAD_DIR = "models/gemma2_2b_it"
         
-        // Number of parameter shards (0-37 based on your output)
+        // Number of parameter shards (0-37 based on ndarray-cache)
         private const val NUM_PARAM_SHARDS = 38
     }
     
@@ -55,17 +55,21 @@ class ModelDownloadService(private val context: Context) {
         
     private var hfToken: String? = null
     
+    /**
+     * Set Hugging Face token for downloading gated models
+     */
     fun setHuggingFaceToken(token: String) {
-        hfToken = token
+        hfToken = token.trim()
+        Log.d(TAG, "HF token set" + (if (token.isNotEmpty()) " (non-empty)" else " (empty)"))
     }
     
     /**
-     * Download model files
+     * Download model files from Hugging Face
      * @return Directory containing all model files, or null if download failed
      */
     suspend fun downloadModelFiles(): File? = withContext(Dispatchers.IO) {
         try {
-            Log.d(TAG, "Starting download of model files...")
+            Log.d(TAG, "Starting download of model files from $REPO_BASE_URL")
             _downloadProgress.value = 0f
             
             val modelDir = prepareDownloadDirectory()
@@ -86,6 +90,8 @@ class ModelDownloadService(private val context: Context) {
             for (fileName in configFiles) {
                 val file = File(modelDir, fileName)
                 val fileUrl = "$REPO_BASE_URL/$fileName"
+                Log.d(TAG, "Downloading config file: $fileName")
+                
                 val success = downloadFile(fileUrl, file, true)
                 
                 if (!success) {
@@ -95,6 +101,7 @@ class ModelDownloadService(private val context: Context) {
                 
                 filesDownloaded++
                 _downloadProgress.value = filesDownloaded.toFloat() / totalFiles
+                Log.d(TAG, "Config file downloaded: $fileName, progress: ${(_downloadProgress.value * 100).toInt()}%")
             }
             
             // Now download parameter shards
@@ -102,17 +109,31 @@ class ModelDownloadService(private val context: Context) {
                 val fileName = "params_shard_$i.bin"
                 val file = File(modelDir, fileName)
                 val fileUrl = "$REPO_BASE_URL/$fileName"
-                val success = downloadFile(fileUrl, file, false)
                 
-                if (!success) {
-                    Log.e(TAG, "Failed to download parameter shard: $fileName")
-                    return@withContext null
+                // Only download if the file doesn't exist or is empty
+                if (!file.exists() || file.length() == 0L) {
+                    Log.d(TAG, "Downloading parameter shard: $fileName")
+                    val success = downloadFile(fileUrl, file, false)
+                    
+                    if (!success) {
+                        Log.e(TAG, "Failed to download parameter shard: $fileName")
+                        return@withContext null
+                    }
+                } else {
+                    Log.d(TAG, "Parameter shard already exists, skipping: $fileName")
                 }
                 
                 filesDownloaded++
                 _downloadProgress.value = filesDownloaded.toFloat() / totalFiles
                 
-                Log.d(TAG, "Downloaded shard $i/${NUM_PARAM_SHARDS-1} (${_downloadProgress.value * 100}%)")
+                Log.d(TAG, "Downloaded shard $i/${NUM_PARAM_SHARDS-1} (${(_downloadProgress.value * 100).toInt()}%)")
+            }
+            
+            // Verify integrity
+            val success = validateDownloadedFiles(modelDir, configFiles)
+            if (!success) {
+                Log.e(TAG, "Validation of downloaded files failed")
+                return@withContext null
             }
             
             _downloadProgress.value = 1f
@@ -126,15 +147,48 @@ class ModelDownloadService(private val context: Context) {
     }
     
     /**
-     * Download a file
+     * Validate downloaded files
+     */
+    private fun validateDownloadedFiles(modelDir: File, configFiles: List<String>): Boolean {
+        // Check that all config files exist and are not empty
+        for (fileName in configFiles) {
+            val file = File(modelDir, fileName)
+            if (!file.exists() || file.length() == 0L) {
+                Log.e(TAG, "Validation failed: $fileName does not exist or is empty")
+                return false
+            }
+        }
+        
+        // Check that at least some parameter shards exist
+        var shardCount = 0
+        for (i in 0 until NUM_PARAM_SHARDS) {
+            val file = File(modelDir, "params_shard_$i.bin")
+            if (file.exists() && file.length() > 0L) {
+                shardCount++
+            }
+        }
+        
+        if (shardCount < NUM_PARAM_SHARDS) {
+            Log.w(TAG, "Warning: Only $shardCount out of $NUM_PARAM_SHARDS parameter shards were downloaded")
+        }
+        
+        return true
+    }
+    
+    /**
+     * Download a file from a URL
+     * @param url URL to download from
+     * @param outputFile File to write to
+     * @param isSmallFile Whether this is a small file (config) or large file (parameter shard)
+     * @return true if download was successful, false otherwise
      */
     private suspend fun downloadFile(url: String, outputFile: File, isSmallFile: Boolean): Boolean = withContext(Dispatchers.IO) {
         try {
             Log.d(TAG, "Downloading $url to ${outputFile.absolutePath}")
             
-            // Skip if file already exists
+            // Skip if file already exists and has content
             if (outputFile.exists() && outputFile.length() > 0) {
-                Log.d(TAG, "File already exists, skipping download: ${outputFile.name}")
+                Log.d(TAG, "File already exists with ${outputFile.length()} bytes, skipping download: ${outputFile.name}")
                 return@withContext true
             }
             
@@ -142,10 +196,11 @@ class ModelDownloadService(private val context: Context) {
             val requestBuilder = Request.Builder().url(url)
             
             // Add auth header if token is available
-            hfToken?.let {
+            if (!hfToken.isNullOrEmpty()) {
+                Log.d(TAG, "Adding HF token to request")
                 requestBuilder.headers(
                     Headers.Builder()
-                        .add("Authorization", "Bearer $it")
+                        .add("Authorization", "Bearer $hfToken")
                         .build()
                 )
             }
@@ -155,6 +210,9 @@ class ModelDownloadService(private val context: Context) {
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     Log.e(TAG, "Failed to download file: ${response.code} - ${response.message}")
+                    if (response.code == 401 || response.code == 403) {
+                        Log.e(TAG, "Authorization error - check your Hugging Face token")
+                    }
                     return@withContext false
                 }
                 
@@ -187,10 +245,10 @@ class ModelDownloadService(private val context: Context) {
                                     // We don't update the global progress here as it's managed at the file level
                                     val fileProgress = totalBytes.toFloat() / contentLength.toFloat()
                                     
-                                    // Log progress
+                                    // Log progress at 10% intervals
                                     val progressPercent = (fileProgress * 100).toInt()
-                                    if (progressPercent % 20 == 0) {
-                                        Log.d(TAG, "File download progress: $progressPercent%")
+                                    if (progressPercent % 10 == 0 && progressPercent > 0) {
+                                        Log.d(TAG, "File download progress for ${outputFile.name}: $progressPercent%")
                                     }
                                 }
                             }
@@ -199,9 +257,12 @@ class ModelDownloadService(private val context: Context) {
                         }
                     }.buffer()
                     
+                    // Create parent directories if they don't exist
+                    outputFile.parentFile?.mkdirs()
+                    
                     // Write to file
                     FileOutputStream(outputFile).use { output ->
-                        val buffer = ByteArray(4096)
+                        val buffer = ByteArray(8192)
                         var bytesRead: Int
                         
                         while (source.read(buffer).also { bytesRead = it.toInt() } != -1) {
@@ -209,6 +270,7 @@ class ModelDownloadService(private val context: Context) {
                         }
                     }
                     
+                    Log.d(TAG, "Downloaded ${outputFile.name}: ${outputFile.length()} bytes")
                     return@withContext true
                 }
                 
@@ -217,13 +279,13 @@ class ModelDownloadService(private val context: Context) {
             }
             
         } catch (e: SocketTimeoutException) {
-            Log.e(TAG, "Timeout downloading file", e)
+            Log.e(TAG, "Timeout downloading file: ${outputFile.name}", e)
             return@withContext false
         } catch (e: IOException) {
-            Log.e(TAG, "IO error downloading file", e)
+            Log.e(TAG, "IO error downloading file: ${outputFile.name}", e)
             return@withContext false
         } catch (e: Exception) {
-            Log.e(TAG, "Error downloading file", e)
+            Log.e(TAG, "Error downloading file: ${outputFile.name}", e)
             return@withContext false
         }
     }
