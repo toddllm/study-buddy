@@ -20,7 +20,36 @@ fi
 MODEL_DIR="app/src/main/assets/models/gemma2_2b_it"
 JNILIBS_DIR="app/src/main/jniLibs/arm64-v8a"
 INCLUDE_DIR="app/src/main/cpp/include"
-ANDROID_NDK=$HOME/Library/Android/sdk/ndk/26.1.10909125
+
+# Check for Android NDK
+if [ -z "$ANDROID_NDK_HOME" ]; then
+    # Try to find Android NDK in standard locations
+    if [ -d "$HOME/Library/Android/sdk/ndk" ]; then
+        # Find the newest version
+        NEWEST_NDK=$(find "$HOME/Library/Android/sdk/ndk" -maxdepth 1 -type d | sort -r | head -n 1)
+        if [ -n "$NEWEST_NDK" ]; then
+            export ANDROID_NDK_HOME="$NEWEST_NDK"
+            echo "Using Android NDK at $ANDROID_NDK_HOME"
+        else
+            echo "❌ ERROR: Android NDK not found."
+            exit 1
+        fi
+    elif [ -d "$ANDROID_HOME/ndk" ]; then
+        NEWEST_NDK=$(find "$ANDROID_HOME/ndk" -maxdepth 1 -type d | sort -r | head -n 1)
+        if [ -n "$NEWEST_NDK" ]; then
+            export ANDROID_NDK_HOME="$NEWEST_NDK"
+            echo "Using Android NDK at $ANDROID_NDK_HOME"
+        else
+            echo "❌ ERROR: Android NDK not found."
+            exit 1
+        fi
+    else
+        echo "❌ ERROR: Android NDK not found. Please set ANDROID_NDK_HOME environment variable."
+        exit 1
+    fi
+fi
+
+echo "Using Android NDK: $ANDROID_NDK_HOME"
 
 # Step 1: Clean up any previous implementations or mock code
 echo "===== Step 1: Cleaning up any previous implementations ====="
@@ -216,57 +245,41 @@ pub extern "C" fn tvm_runtime_create() -> *mut c_void {
 EOF
 fi
 
-# Install Rust targets for Android if not already installed
+# Install the rust android target
 rustup target add aarch64-linux-android
 
-# Check the Android NDK path
-if [ ! -d "$ANDROID_NDK" ]; then
-    echo "⚠️ Android NDK not found at $ANDROID_NDK."
-    echo "Looking for Android NDK in standard locations..."
-    
-    # Try to find the Android NDK
-    if [ -d "$HOME/Library/Android/sdk/ndk" ]; then
-        # Find the newest version
-        NEWEST_NDK=$(find "$HOME/Library/Android/sdk/ndk" -maxdepth 1 -type d | sort -r | head -n 1)
-        if [ -n "$NEWEST_NDK" ]; then
-            ANDROID_NDK="$NEWEST_NDK"
-            echo "Found Android NDK at $ANDROID_NDK"
-        else
-            echo "❌ Android NDK not found. Please install it through Android Studio."
-            exit 1
-        fi
-    else
-        echo "❌ Android NDK not found. Please install it through Android Studio."
-        exit 1
-    fi
-fi
-
-# Create .cargo/config.toml with linker configuration
+# Create cargo config with the correct Android linker
 mkdir -p .cargo
 cat > .cargo/config.toml << EOF
 [target.aarch64-linux-android]
-linker = "$ANDROID_NDK/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android24-clang"
-ar = "$ANDROID_NDK/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar"
+linker = "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android24-clang"
 EOF
 
-# Build the library for Android ARM64 target
-echo "Building Rust library for Android ARM64 target..."
+# Build using cross-compilation
+echo "Cross-compiling for Android ARM64..."
 cargo build --release --target aarch64-linux-android
 
-# Verify the build
-if [ -f "target/aarch64-linux-android/release/libgemma_2_2b_it_q4f16_1.so" ]; then
-    echo "✅ Rust library built successfully"
-else
-    echo "❌ Failed to build Rust library"
+# Check if the library was built
+if [ ! -f "target/aarch64-linux-android/release/libgemma_2_2b_it_q4f16_1.so" ]; then
+    echo "❌ ERROR: Failed to build library."
     exit 1
 fi
 
-# Check library symbols
-echo "Checking library symbols..."
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    nm -gU target/aarch64-linux-android/release/libgemma_2_2b_it_q4f16_1.so | grep -E "mlc_create_chat_module|generate|reset_chat|set_parameter" || true
+# Verify the ELF format (should not be macOS MachO format)
+if file target/aarch64-linux-android/release/libgemma_2_2b_it_q4f16_1.so | grep -q "Mach-O"; then
+    echo "❌ ERROR: Generated library is in Mach-O format, not ELF. Cross-compilation failed."
+    exit 1
 else
-    nm -D target/aarch64-linux-android/release/libgemma_2_2b_it_q4f16_1.so | grep -E "mlc_create_chat_module|generate|reset_chat|set_parameter" || true
+    echo "✅ Library format verified as non-Mach-O."
+fi
+
+echo "Checking library symbols..."
+if which arm-linux-androideabi-nm &>/dev/null; then
+    # Use Android NDK tools if available
+    arm-linux-androideabi-nm -D target/aarch64-linux-android/release/libgemma_2_2b_it_q4f16_1.so | grep -E "mlc_create_chat_module|generate|reset_chat|set_parameter" || true
+else
+    # Fall back to standard tools
+    nm -D target/aarch64-linux-android/release/libgemma_2_2b_it_q4f16_1.so 2>/dev/null | grep -E "mlc_create_chat_module|generate|reset_chat|set_parameter" || true
 fi
 
 # Copy the library to the jniLibs and model directories
@@ -275,6 +288,9 @@ mkdir -p "$JNILIBS_DIR"
 mkdir -p "$MODEL_DIR/lib"
 cp "$RUST_PROJECT_DIR/target/aarch64-linux-android/release/libgemma_2_2b_it_q4f16_1.so" "$JNILIBS_DIR/"
 cp "$RUST_PROJECT_DIR/target/aarch64-linux-android/release/libgemma_2_2b_it_q4f16_1.so" "$MODEL_DIR/lib/"
+
+# Also create a symlink for the alternate name format that might be expected by the app
+ln -sf "$JNILIBS_DIR/libgemma_2_2b_it_q4f16_1.so" "$JNILIBS_DIR/libgemma-2-2b-it-q4f16_1.so" 2>/dev/null || true
 
 # Step 5: Build the Android application
 echo "===== Step 5: Building the Android application ====="
