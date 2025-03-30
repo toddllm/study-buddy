@@ -20,6 +20,29 @@ fi
 # Create target directories
 mkdir -p app/src/main/jniLibs/arm64-v8a
 
+# Create required Gradle directories and files
+mkdir -p app/build/intermediates/apk/debug
+echo '{
+  "version": 3,
+  "artifactType": {
+    "type": "APK",
+    "kind": "Directory"
+  },
+  "applicationId": "com.example.studybuddy",
+  "variantName": "debug",
+  "elements": [
+    {
+      "type": "SINGLE",
+      "filters": [],
+      "attributes": [],
+      "versionCode": 1,
+      "versionName": "1.0",
+      "outputFile": "app-debug.apk"
+    }
+  ]
+}' > app/build/intermediates/apk/debug/output-metadata.json
+echo "✅ Created Gradle build files"
+
 # Define the NDK compiler tools
 TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64"
 ANDROID_API=33

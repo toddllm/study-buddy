@@ -118,6 +118,28 @@ The final build script compiles the C++ code using the Android NDK:
 TMP_DIR="tmp_gemma_impl_final"
 mkdir -p $TMP_DIR
 
+# Create required Gradle directories and files
+mkdir -p app/build/intermediates/apk/debug
+echo '{
+  "version": 3,
+  "artifactType": {
+    "type": "APK",
+    "kind": "Directory"
+  },
+  "applicationId": "com.example.studybuddy",
+  "variantName": "debug",
+  "elements": [
+    {
+      "type": "SINGLE",
+      "filters": [],
+      "attributes": [],
+      "versionCode": 1,
+      "versionName": "1.0",
+      "outputFile": "app-debug.apk"
+    }
+  ]
+}' > app/build/intermediates/apk/debug/output-metadata.json
+
 # Create C++ implementation file
 cat > $TMP_DIR/gemma_lib.cpp << 'EOF'
 # ... C++ implementation ...
@@ -150,6 +172,45 @@ Our debugging tools included:
 - Adding extra logging in the implementation
 - Analyzing symbols in the compiled library
 
+### 6. Fixing Gradle Build Issues
+
+When building with Gradle, you might encounter this error:
+
+```
+A problem was found with the configuration of task ':app:createDebugApkListingFileRedirect' (type 'ListingFileRedirectTask').
+  - In plugin 'com.android.internal.version-check' type 'com.android.build.gradle.internal.tasks.ListingFileRedirectTask' property 'listingFile' specifies file '/path/to/app/build/intermediates/apk/debug/output-metadata.json' which doesn't exist.
+```
+
+To fix this, create the missing file and directory structure:
+
+```bash
+# Create directory for output-metadata.json
+mkdir -p app/build/intermediates/apk/debug
+
+# Create a minimal valid output-metadata.json file
+echo '{
+  "version": 3,
+  "artifactType": {
+    "type": "APK", 
+    "kind": "Directory"
+  },
+  "applicationId": "com.example.studybuddy",
+  "variantName": "debug",
+  "elements": [
+    {
+      "type": "SINGLE",
+      "filters": [],
+      "attributes": [],
+      "versionCode": 1,
+      "versionName": "1.0",
+      "outputFile": "app-debug.apk"
+    }
+  ]
+}' > app/build/intermediates/apk/debug/output-metadata.json
+```
+
+This ensures the Gradle build can find the file it expects during the build process.
+
 ## Common Issues and Solutions
 
 1. **Segmentation Faults**: The key insight was that the JNI layer likely expected a C++ object with virtual methods, not a plain C struct.
@@ -163,6 +224,9 @@ Our debugging tools included:
 
 4. **Symbol Resolution**: Ensure all required functions are exported
    - Required symbols: `mlc_create_chat_module`, `generate`, `reset_chat`, `set_parameter`
+
+5. **Gradle Build Errors**: Missing expected files during build
+   - Solution: Create the required directory structure and files before building
 
 ## Conclusion
 
