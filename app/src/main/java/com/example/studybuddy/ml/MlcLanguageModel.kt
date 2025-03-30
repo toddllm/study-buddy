@@ -30,13 +30,20 @@ class MlcLanguageModel(context: Context) : LanguageModel(context) {
      */
     suspend fun areModelFilesAvailable(): Boolean = withContext(Dispatchers.IO) {
         try {
-            // Just check if the directory exists - the model will create it if needed
-            if (internalModelDir.exists()) {
-                Log.d(tag, "Found model directory at ${internalModelDir.absolutePath}")
+            // Check if downloaded model files exist
+            val modelDownloader = GemmaModelDownloader(context)
+            if (modelDownloader.isModelDownloaded()) {
+                Log.d(tag, "Found downloaded model files at ${modelDownloader.getModelDirectory().absolutePath}")
                 return@withContext true
             }
             
-            Log.d(tag, "Model directory not found")
+            // Check internal model directory as fallback
+            if (internalModelDir.exists()) {
+                Log.d(tag, "Found internal model directory at ${internalModelDir.absolutePath}")
+                return@withContext true
+            }
+            
+            Log.d(tag, "Model files not found in any location")
             return@withContext false
         } catch (e: Exception) {
             Log.e(tag, "Error checking model files: ${e.message}", e)

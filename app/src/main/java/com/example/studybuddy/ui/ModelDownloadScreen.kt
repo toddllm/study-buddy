@@ -87,7 +87,13 @@ fun ModelDownloadScreen(
     LaunchedEffect(key1 = Unit) {
         withContext(Dispatchers.IO) {
             try {
-                val filesAvailable = mlcModel.areModelFilesAvailable()
+                // First check if model is already downloaded using the new downloader
+                val gemmaDownloader = com.example.studybuddy.ml.GemmaModelDownloader(context)
+                val modelDownloaded = gemmaDownloader.isModelDownloaded()
+                
+                // Then check if model files are available through the traditional path
+                val filesAvailable = modelDownloaded || mlcModel.areModelFilesAvailable()
+                
                 if (filesAvailable) {
                     downloadStatus = "Model files already available"
                     
@@ -292,6 +298,28 @@ fun ModelDownloadScreen(
                                     try {
                                         // Download model files
                                         val modelDir = withContext(Dispatchers.IO) {
+                                            // Try to use the new Gemma downloader first
+                                            val gemmaDownloader = com.example.studybuddy.ml.GemmaModelDownloader(context)
+                                            
+                                            // Track download progress
+                                            var success: Boolean
+                                            success = gemmaDownloader.downloadModel(
+                                                progressCallback = { progress ->
+                                                    downloadService.updateDownloadProgress(progress)
+                                                },
+                                                fileProgressCallback = { fileName, progress ->
+                                                    val statusMessage = "Downloading $fileName: ${(progress * 100).toInt()}%"
+                                                    if (progress % 0.05f < 0.01f) { // Update status ~every 5%
+                                                        downloadStatus = statusMessage
+                                                    }
+                                                }
+                                            )
+                                            
+                                            // Return the model directory if download was successful
+                                            if (success) gemmaDownloader.getModelDirectory() else null
+                                        } ?: withContext(Dispatchers.IO) {
+                                            // Fall back to the original download method if the new one fails
+                                            downloadStatus = "Falling back to legacy download method..."
                                             downloadService.downloadModelFiles()
                                         }
                                         

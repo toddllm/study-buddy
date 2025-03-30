@@ -45,15 +45,26 @@ class SimpleMlcModel(context: Context) : LanguageModel(context) {
             try {
                 Log.d(tag, "Initializing SimpleMlcModel")
                 
-                // Create model directory if it doesn't exist
-                if (!internalModelDir.exists()) {
-                    Log.d(tag, "Creating model directory: ${internalModelDir.absolutePath}")
-                    internalModelDir.mkdirs()
+                // Check if we have a downloader and if model files are downloaded
+                val modelDownloader = GemmaModelDownloader(context)
+                val modelDirPath = if (modelDownloader.isModelDownloaded()) {
+                    // Use the downloaded model files
+                    val downloadedModelDir = modelDownloader.getModelDirectory()
+                    Log.d(tag, "Using downloaded model files from: ${downloadedModelDir.absolutePath}")
+                    downloadedModelDir.absolutePath
+                } else {
+                    // Fall back to internal model directory
+                    if (!internalModelDir.exists()) {
+                        Log.d(tag, "Creating model directory: ${internalModelDir.absolutePath}")
+                        internalModelDir.mkdirs()
+                    }
+                    Log.d(tag, "Using internal model directory: ${internalModelDir.absolutePath}")
+                    internalModelDir.absolutePath
                 }
                 
                 // Initialize the native model
                 try {
-                    mlc_create_chat_module(internalModelDir.absolutePath)
+                    mlc_create_chat_module(modelDirPath)
                     
                     // Set initialized state
                     isInitialized = true

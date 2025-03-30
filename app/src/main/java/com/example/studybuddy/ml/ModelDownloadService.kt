@@ -300,4 +300,12 @@ class ModelDownloadService(private val context: Context) {
         }
         return downloadDir
     }
+    
+    /**
+     * Update download progress directly
+     * This allows other components to update our progress state flow
+     */
+    fun updateDownloadProgress(progress: Float) {
+        _downloadProgress.value = progress
+    }
 } 
