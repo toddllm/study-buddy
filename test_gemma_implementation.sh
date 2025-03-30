@@ -5,10 +5,72 @@ set -e  # Exit on error
 
 echo "===== Testing StudyBuddy Gemma Implementation ====="
 
+# Check for adb command
+if ! command -v adb &> /dev/null; then
+    echo "⚠️ adb command not found, trying to use Android SDK location..."
+    if [ -d "$HOME/Library/Android/sdk/platform-tools" ]; then
+        export PATH="$HOME/Library/Android/sdk/platform-tools:$PATH"
+        echo "✅ Using adb from Android SDK"
+    else
+        echo "❌ ERROR: adb command not found. Please make sure Android SDK platform-tools are installed."
+        exit 1
+    fi
+fi
+
 # Check if device is connected
-if ! adb devices | grep -q "device$"; then
-    echo "❌ ERROR: No device connected. Please connect an Android device."
-    exit 1
+if ! adb devices | grep -q -E "device$|emulator"; then
+    # No device connected, try to start the emulator
+    echo "⚠️ No device connected. Trying to start the emulator..."
+    
+    # Check if emulator command exists
+    if ! command -v emulator &> /dev/null; then
+        if [ -d "$HOME/Library/Android/sdk/emulator" ]; then
+            EMULATOR="$HOME/Library/Android/sdk/emulator/emulator"
+        else
+            echo "❌ ERROR: emulator command not found. Please connect a physical device or install Android emulator."
+            exit 1
+        fi
+    else
+        EMULATOR="emulator"
+    fi
+    
+    # List available AVDs
+    AVDS=$($EMULATOR -list-avds)
+    if [ -z "$AVDS" ]; then
+        echo "❌ ERROR: No Android Virtual Devices (AVDs) found. Please create one in Android Studio."
+        exit 1
+    fi
+    
+    # Use the first AVD
+    AVD=$(echo "$AVDS" | head -n 1)
+    echo "Starting emulator with AVD: $AVD"
+    $EMULATOR -avd "$AVD" -no-audio -no-boot-anim -no-window &
+    EMULATOR_PID=$!
+    
+    # Wait for emulator to boot
+    echo "Waiting for emulator to boot (may take a while)..."
+    adb wait-for-device
+    
+    # Wait until the boot is complete
+    BOOT_COMPLETE=0
+    for i in {1..30}; do
+        if adb shell getprop sys.boot_completed | grep -q "1"; then
+            BOOT_COMPLETE=1
+            break
+        fi
+        echo "Waiting for boot to complete... ($i/30)"
+        sleep 5
+    done
+    
+    if [ $BOOT_COMPLETE -eq 0 ]; then
+        echo "❌ ERROR: Emulator boot timed out. Please try again or use a physical device."
+        kill $EMULATOR_PID 2>/dev/null || true
+        exit 1
+    fi
+    
+    echo "✅ Emulator started and ready"
+else
+    echo "✅ Device/emulator found"
 fi
 
 # Check if build_real_implementation.sh exists
@@ -90,7 +152,7 @@ adb logcat -v threadtime MLC_CHAT_MODULE:V MlcJniWrapper:V SimpleMlcModel:V Stud
 LOGCAT_PID=$!
 
 # Use trap to ensure cleanup
-trap "kill $LOGCAT_PID 2>/dev/null || true" EXIT
+trap "kill $LOGCAT_PID 2>/dev/null || true; [ -n \"$EMULATOR_PID\" ] && kill $EMULATOR_PID 2>/dev/null || true" EXIT
 
 # Step 5: Launch the app
 echo "Launching StudyBuddy app..."
@@ -100,12 +162,12 @@ echo "Waiting for app to start..."
 
 # Check if app has started successfully
 sleep 5
-if ! adb shell "ps | grep com.example.studybuddy"; then
+if ! adb shell "ps | grep com.example.studybuddy" 2>/dev/null; then
     echo "⚠️ App may not have started correctly. Checking logs..."
     grep -i "ActivityManager.*example.studybuddy" "$LOGFILE" | tail -5
 
     # Try using newer ps command format if the first one failed
-    if ! adb shell "ps -A | grep com.example.studybuddy"; then
+    if ! adb shell "ps -A | grep com.example.studybuddy" 2>/dev/null; then
         echo "❌ Could not confirm app is running. Check the device manually."
     else
         echo "✅ App appears to be running (using ps -A command)."
@@ -230,4 +292,10 @@ else
     echo "⚠️ OVERALL TEST STATUS: PARTIAL SUCCESS"
     echo "Basic checks completed but could not verify query response in logs."
     echo "Please check the app UI manually to confirm functionality."
+fi
+
+# If we started the emulator, print a note
+if [ -n "$EMULATOR_PID" ]; then
+    echo ""
+    echo "Note: The emulator will be shut down when you press Ctrl+C."
 fi 
