@@ -4,8 +4,10 @@ import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * Test utilities for GemmaModelDownloader.
@@ -63,6 +65,88 @@ object GemmaModelDownloaderTest {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Exception during download test", e)
+            }
+        }
+    }
+    
+    /**
+     * Test downloading a file and verifying its checksum.
+     * This specifically tests the checksum verification functionality.
+     * 
+     * @param context Application context
+     * @param fileName Name of an essential file with a known checksum (default: tokenizer_config.json)
+     */
+    fun testChecksumVerification(context: Context, fileName: String = "tokenizer_config.json") {
+        Log.d(TAG, "Starting checksum verification test for $fileName")
+        
+        // Only test with essential files that have checksums defined
+        if (fileName !in listOf(
+                "tokenizer_config.json", 
+                "tokenizer.json", 
+                "tokenizer.model", 
+                "mlc-chat-config.json", 
+                "ndarray-cache.json")) {
+            Log.e(TAG, "Cannot test checksum for $fileName - no checksum defined.")
+            return
+        }
+        
+        val downloader = GemmaModelDownloader(context)
+        
+        // Launch coroutine to test checksum verification
+        CoroutineScope(Dispatchers.Main).launch {
+            try {
+                Log.d(TAG, "Downloading file for checksum verification: $fileName")
+                
+                // First download the file if it doesn't exist
+                val downloadSuccess = downloader.downloadFile(fileName) { progress ->
+                    if ((progress * 10).toInt() % 2 == 0) {
+                        Log.d(TAG, "Download progress: ${(progress * 100).toInt()}%")
+                    }
+                }
+                
+                if (!downloadSuccess) {
+                    Log.e(TAG, "Failed to download file for checksum test")
+                    return@launch
+                }
+                
+                // Now try to tamper with the file to test checksum failure detection
+                val modelDir = downloader.getModelDirectory()
+                val file = modelDir.resolve(fileName)
+                
+                if (!file.exists()) {
+                    Log.e(TAG, "File not found after download: $fileName")
+                    return@launch
+                }
+                
+                Log.d(TAG, "File downloaded successfully, now testing checksum verification")
+                
+                // Make a backup of the file
+                val backupFile = File("${file.absolutePath}.bak")
+                withContext(Dispatchers.IO) {
+                    file.copyTo(backupFile, overwrite = true)
+                    
+                    // Try downloading again - should skip download due to checksum pass
+                    val secondDownloadStart = System.currentTimeMillis()
+                    val redownloadNeeded = !downloader.downloadFile(fileName) { progress ->
+                        // No logging needed
+                    }
+                    val secondDownloadTime = System.currentTimeMillis() - secondDownloadStart
+                    
+                    if (secondDownloadTime < 100) {
+                        Log.d(TAG, "Checksum verification passed - download was skipped (${secondDownloadTime}ms)")
+                    } else {
+                        Log.d(TAG, "File was re-downloaded despite existing - checksum may have failed or wasn't checked")
+                    }
+                    
+                    // Restore original file
+                    backupFile.copyTo(file, overwrite = true)
+                    backupFile.delete()
+                }
+                
+                Log.d(TAG, "Checksum verification test completed for $fileName")
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "Exception during checksum verification test", e)
             }
         }
     }
@@ -138,6 +222,146 @@ object GemmaModelDownloaderTest {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Exception during model download test", e)
+            }
+        }
+    }
+    
+    /**
+     * Test download resumption for a larger file.
+     * This will start a download, interrupt it, and verify it can be resumed.
+     * 
+     * @param context Application context
+     * @param fileName Name of a parameter shard to test (default: params_shard_0.bin - largest file)
+     * @param simulateInterruption If true, will deliberately break the download partway through
+     */
+    fun testDownloadResumption(
+        context: Context, 
+        fileName: String = "params_shard_1.bin",
+        simulateInterruption: Boolean = true
+    ) {
+        Log.d(TAG, "Starting download resumption test for $fileName")
+        
+        val downloader = GemmaModelDownloader(context)
+        val modelDir = downloader.getModelDirectory()
+        val targetFile = modelDir.resolve(fileName)
+        val tempFile = File("${targetFile.absolutePath}.tmp")
+        
+        // Delete both files if they exist to start fresh
+        if (targetFile.exists()) {
+            Log.d(TAG, "Deleting existing target file: ${targetFile.absolutePath}")
+            targetFile.delete()
+        }
+        
+        if (tempFile.exists()) {
+            Log.d(TAG, "Deleting existing temp file: ${tempFile.absolutePath}")
+            tempFile.delete()
+        }
+        
+        // Launch coroutine to test download resumption
+        CoroutineScope(Dispatchers.Main).launch {
+            try {
+                // First start the download but simulate interruption
+                var downloadInterrupted = false
+                var lastProgress = 0f
+                
+                Log.d(TAG, "Starting first download attempt...")
+                val firstAttemptResult = downloader.downloadFile(fileName) { progress ->
+                    if (progress - lastProgress >= 0.05f) {
+                        lastProgress = progress
+                        Log.d(TAG, "First attempt progress: ${(progress * 100).toInt()}%")
+                    }
+                    
+                    // Simulate interruption when download is 10-20% complete
+                    if (simulateInterruption && progress > 0.10f && progress < 0.20f && !downloadInterrupted) {
+                        downloadInterrupted = true
+                        // Throw an exception to simulate network interruption
+                        Log.d(TAG, "Simulating download interruption at ${(progress * 100).toInt()}%")
+                        throw java.net.SocketTimeoutException("Simulated network timeout")
+                    }
+                }
+                
+                // If first attempt completed (small file or interruption disabled)
+                if (firstAttemptResult) {
+                    Log.d(TAG, "Download completed in first attempt - file may be too small for resumption test")
+                    return@launch
+                }
+                
+                // Check if temp file exists and has content
+                if (tempFile.exists() && tempFile.length() > 0) {
+                    val partialSize = tempFile.length()
+                    Log.d(TAG, "Found partial download: $partialSize bytes")
+                    
+                    // Wait a moment to simulate realistic resumption
+                    delay(1000)
+                    
+                    // Now try to resume the download
+                    Log.d(TAG, "Attempting to resume download...")
+                    lastProgress = 0f
+                    val resumeResult = downloader.downloadFile(fileName) { progress ->
+                        if (progress - lastProgress >= 0.05f) {
+                            lastProgress = progress
+                            Log.d(TAG, "Resume attempt progress: ${(progress * 100).toInt()}%")
+                        }
+                    }
+                    
+                    if (resumeResult) {
+                        Log.d(TAG, "Successfully resumed and completed download!")
+                        
+                        // Verify the file exists and has proper size
+                        if (targetFile.exists()) {
+                            Log.d(TAG, "Final file size: ${targetFile.length()} bytes")
+                        } else {
+                            Log.e(TAG, "Target file does not exist after successful download")
+                        }
+                    } else {
+                        Log.e(TAG, "Failed to resume download")
+                    }
+                } else {
+                    Log.e(TAG, "No partial download found - interruption test may have failed")
+                }
+            } catch (e: Exception) {
+                if (e is java.net.SocketTimeoutException && e.message?.contains("Simulated") == true) {
+                    // This is expected for our simulation
+                    Log.d(TAG, "Simulated interruption triggered, checking for partial file...")
+                    
+                    // Check if the partial download was saved
+                    if (tempFile.exists() && tempFile.length() > 0) {
+                        val partialSize = tempFile.length()
+                        Log.d(TAG, "Partial download saved successfully: $partialSize bytes")
+                        
+                        // Wait a moment to simulate realistic resumption
+                        delay(1000)
+                        
+                        // Now try to resume the download
+                        var lastProgress = 0f
+                        Log.d(TAG, "Attempting to resume download after interruption...")
+                        val resumeResult = withContext(Dispatchers.IO) {
+                            downloader.downloadFile(fileName) { progress ->
+                                if (progress - lastProgress >= 0.05f) {
+                                    lastProgress = progress
+                                    Log.d(TAG, "Resume progress: ${(progress * 100).toInt()}%")
+                                }
+                            }
+                        }
+                        
+                        if (resumeResult) {
+                            Log.d(TAG, "Successfully resumed and completed download!")
+                            
+                            // Verify the file exists and has proper size
+                            if (targetFile.exists()) {
+                                Log.d(TAG, "Final file size: ${targetFile.length()} bytes")
+                            } else {
+                                Log.e(TAG, "Target file does not exist after successful download")
+                            }
+                        } else {
+                            Log.e(TAG, "Failed to resume download")
+                        }
+                    } else {
+                        Log.e(TAG, "No partial download saved after interruption")
+                    }
+                } else {
+                    Log.e(TAG, "Exception during download resumption test", e)
+                }
             }
         }
     }

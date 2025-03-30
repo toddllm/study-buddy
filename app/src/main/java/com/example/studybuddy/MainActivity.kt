@@ -2,7 +2,6 @@ package com.example.studybuddy
 
 import android.os.Bundle
 import android.util.Log
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -53,9 +52,6 @@ class MainActivity : ComponentActivity() {
                 // State to track whether the download screen should be shown
                 var showDownloadScreen by remember { mutableStateOf(true) }
                 
-                // For demo/testing: allow testing the downloader
-                var showTestButton by remember { mutableStateOf(true) }
-                
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     if (showDownloadScreen) {
                         // Show download screen first
@@ -65,22 +61,6 @@ class MainActivity : ComponentActivity() {
                                 .fillMaxSize()
                                 .padding(innerPadding)
                         )
-                        
-                        // Overlay a test button if in testing mode
-                        if (showTestButton) {
-                            Box(modifier = Modifier.fillMaxSize()) {
-                                Button(
-                                    onClick = {
-                                        // Test the Gemma model downloader
-                                        testGemmaModelDownloader()
-                                        showTestButton = false // Hide after clicked
-                                    },
-                                    modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
-                                ) {
-                                    Text("Test Gemma Download")
-                                }
-                            }
-                        }
                     } else {
                         // Show main app screen after download
                         ModelScreen(
@@ -92,20 +72,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-    }
-    
-    /**
-     * Test the Gemma model downloader functionality
-     */
-    private fun testGemmaModelDownloader() {
-        Log.d(TAG, "Testing Gemma model downloader")
-        Toast.makeText(this, "Starting Gemma model download test...", Toast.LENGTH_SHORT).show()
-        
-        // Test downloading a single small file
-        GemmaModelDownloaderTest.testDownloadSingleFile(this)
-        
-        // Uncomment to test downloading more files
-        // GemmaModelDownloaderTest.testDownloadModel(this, essentialFilesOnly = true, maxFilesToDownload = 3)
     }
     
     private fun testLoadLibrary() {

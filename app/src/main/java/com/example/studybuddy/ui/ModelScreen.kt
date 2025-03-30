@@ -151,12 +151,78 @@ fun ModelScreen(
                     }
                 }
                 3 -> {
-                    // Settings Tab (placeholder for now)
-                    Box(modifier = Modifier.fillMaxSize()) {
+                    // Settings Tab with Model Testing options
+                    val context = LocalContext.current
+                    
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
                         Text(
-                            text = "Settings Feature Coming Soon",
-                            modifier = Modifier.fillMaxWidth(),
-                            textAlign = TextAlign.Center
+                            text = "Settings",
+                            style = MaterialTheme.typography.headlineMedium,
+                            modifier = Modifier.padding(bottom = 16.dp)
+                        )
+                        
+                        // Model Testing Section
+                        Text(
+                            text = "Model Testing",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                        
+                        Button(
+                            onClick = {
+                                // Run the checksum verification test
+                                Toast.makeText(context, "Testing checksum verification...", Toast.LENGTH_SHORT).show()
+                                com.example.studybuddy.ml.GemmaModelDownloaderTest.testChecksumVerification(context)
+                            }
+                        ) {
+                            Text("Test Checksum Verification")
+                        }
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        Button(
+                            onClick = {
+                                // Test downloading a single file
+                                Toast.makeText(context, "Testing single file download...", Toast.LENGTH_SHORT).show()
+                                com.example.studybuddy.ml.GemmaModelDownloaderTest.testDownloadSingleFile(context)
+                            }
+                        ) {
+                            Text("Test Single File Download")
+                        }
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        Button(
+                            onClick = {
+                                // Test model download (limited to 3 files)
+                                Toast.makeText(context, "Testing model download...", Toast.LENGTH_SHORT).show()
+                                com.example.studybuddy.ml.GemmaModelDownloaderTest.testDownloadModel(context, essentialFilesOnly = true, maxFilesToDownload = 3)
+                            }
+                        ) {
+                            Text("Test Limited Model Download")
+                        }
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        Button(
+                            onClick = {
+                                // Test download resumption
+                                Toast.makeText(context, "Testing download resumption...", Toast.LENGTH_SHORT).show()
+                                com.example.studybuddy.ml.GemmaModelDownloaderTest.testDownloadResumption(context)
+                            }
+                        ) {
+                            Text("Test Download Resumption")
+                        }
+                        
+                        Text(
+                            text = "Check logcat with tag 'GemmaModelDownloaderTest' for results",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
