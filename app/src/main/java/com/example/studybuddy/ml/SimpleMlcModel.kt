@@ -21,11 +21,12 @@ class SimpleMlcModel(context: Context) : LanguageModel(context) {
     private val internalModelDir by lazy { File(context.filesDir, "models/gemma2_2b_it") }
     
     companion object {
-        // Load the native library
+        // Load the native libraries
         init {
             try {
-                System.loadLibrary("gemma-2-2b-it-q4f16_1")
-                Log.d("SimpleMlcModel", "Native library loaded successfully")
+                // Load our JNI wrapper library that contains all the necessary implementations
+                System.loadLibrary("mlc_jni_wrapper")
+                Log.d("SimpleMlcModel", "JNI wrapper library loaded successfully")
             } catch (e: UnsatisfiedLinkError) {
                 Log.e("SimpleMlcModel", "Failed to load native library: ${e.message}")
             }
@@ -37,6 +38,7 @@ class SimpleMlcModel(context: Context) : LanguageModel(context) {
     private external fun generate(prompt: String): String
     private external fun reset_chat()
     private external fun set_parameter(key: String, value: Float)
+    private external fun shutdown_native()
     
     override suspend fun initialize() {
         withContext(Dispatchers.IO) {
@@ -139,7 +141,16 @@ class SimpleMlcModel(context: Context) : LanguageModel(context) {
     }
     
     override suspend fun shutdown() {
-        // No specific shutdown needed, just update state
+        if (isInitialized) {
+            try {
+                shutdown_native()
+                Log.d(tag, "Native resources released")
+            } catch (e: Exception) {
+                Log.e(tag, "Error shutting down native resources: ${e.message}", e)
+            }
+        }
+        
+        // Update state
         isInitialized = false
         _initialized.value = false
         Log.d(tag, "SimpleMlcModel shut down")

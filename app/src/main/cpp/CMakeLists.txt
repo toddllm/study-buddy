@@ -88,3 +88,31 @@ target_link_libraries(mlc_llm_jni
 #     OUTPUT_NAME "gemma-2-2b-it-q4f16_1"
 #     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/model_lib"
 # )
+
+# Import the Gemma library
+add_library(gemma-2-2b-it-q4f16_1 SHARED IMPORTED)
+set_target_properties(gemma-2-2b-it-q4f16_1 PROPERTIES 
+    IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/arm64-v8a/libgemma-2-2b-it-q4f16_1.so
+)
+
+# Add our JNI wrapper library for the Gemma model
+add_library(mlc_jni_wrapper SHARED
+    mlc_jni_wrapper.cpp
+)
+
+# Include headers for the MLC JNI wrapper library
+target_include_directories(mlc_jni_wrapper PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Link the JNI wrapper with Android log and main libraries
+# Note: We're using dynamic loading (dlopen/dlsym) for Gemma library,
+# so we don't need to link against it directly
+target_link_libraries(mlc_jni_wrapper
+    ${log-lib}
+    android
+    dl  # Add the dynamic loading library
+)
+
+# Note: No longer importing or linking against the Gemma library
+# since we're implementing the functions directly in the wrapper

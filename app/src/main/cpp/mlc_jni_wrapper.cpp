@@ -2,17 +2,84 @@
 #include <string>
 #include <android/log.h>
 #include <stdlib.h>
+#include <dlfcn.h>
 
 #define TAG "MlcJniWrapper"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
-// Forward declarations for the actual Gemma library functions
-extern "C" {
-    void* mlc_create_chat_module(const char* model_path);
-    char* generate(const char* prompt);
-    void reset_chat();
-    void set_parameter(const char* key, float value);
+// Function pointer types for Gemma functions
+typedef void* (*CreateModuleFn)(const char*);
+typedef char* (*GenerateFn)(const char*);
+typedef void (*ResetChatFn)();
+typedef void (*SetParameterFn)(const char*, float);
+
+// Global function pointers and library handle
+static void* g_lib_handle = nullptr;
+static CreateModuleFn g_create_module_fn = nullptr;
+static GenerateFn g_generate_fn = nullptr;
+static ResetChatFn g_reset_chat_fn = nullptr;
+static SetParameterFn g_set_parameter_fn = nullptr;
+
+// Loads the Gemma library and resolves all function pointers
+bool initialize_gemma_library() {
+    if (g_lib_handle != nullptr) {
+        // Already initialized
+        return true;
+    }
+    
+    LOGI("Attempting to load Gemma library");
+    
+    // Try to load the library
+    const char* lib_name = "libgemma-2-2b-it-q4f16_1.so";
+    g_lib_handle = dlopen(lib_name, RTLD_NOW);
+    
+    if (g_lib_handle == nullptr) {
+        const char* error = dlerror();
+        LOGE("Failed to load Gemma library: %s", error ? error : "unknown error");
+        return false;
+    }
+    
+    LOGI("Successfully loaded Gemma library");
+    
+    // Clear any existing errors
+    dlerror();
+    
+    // Resolve function pointers
+    g_create_module_fn = (CreateModuleFn)dlsym(g_lib_handle, "mlc_create_chat_module");
+    if (g_create_module_fn == nullptr) {
+        LOGE("Failed to resolve mlc_create_chat_module: %s", dlerror());
+        dlclose(g_lib_handle);
+        g_lib_handle = nullptr;
+        return false;
+    }
+    
+    g_generate_fn = (GenerateFn)dlsym(g_lib_handle, "generate");
+    if (g_generate_fn == nullptr) {
+        LOGE("Failed to resolve generate: %s", dlerror());
+        dlclose(g_lib_handle);
+        g_lib_handle = nullptr;
+        return false;
+    }
+    
+    g_reset_chat_fn = (ResetChatFn)dlsym(g_lib_handle, "reset_chat");
+    if (g_reset_chat_fn == nullptr) {
+        LOGE("Failed to resolve reset_chat: %s", dlerror());
+        dlclose(g_lib_handle);
+        g_lib_handle = nullptr;
+        return false;
+    }
+    
+    g_set_parameter_fn = (SetParameterFn)dlsym(g_lib_handle, "set_parameter");
+    if (g_set_parameter_fn == nullptr) {
+        LOGE("Failed to resolve set_parameter: %s", dlerror());
+        dlclose(g_lib_handle);
+        g_lib_handle = nullptr;
+        return false;
+    }
+    
+    LOGI("Successfully resolved all Gemma library functions");
+    return true;
 }
 
 // JNI wrapper functions with the proper naming convention
@@ -23,12 +90,22 @@ extern "C" {
             JNIEnv* env, jobject thiz, jstring model_path) {
         LOGI("JNI: mlc_create_chat_module called");
         
+        // Initialize the library if not already done
+        if (!initialize_gemma_library()) {
+            LOGE("CRITICAL ERROR: Failed to initialize Gemma library");
+            env->ThrowNew(
+                env->FindClass("java/lang/RuntimeException"),
+                "Failed to initialize Gemma library - required for real implementation"
+            );
+            return nullptr;
+        }
+        
         // Convert Java string to C string
         const char* path = env->GetStringUTFChars(model_path, 0);
         LOGI("Model path: %s", path);
         
-        // Call the real Gemma library function
-        void* module_ptr = mlc_create_chat_module(path);
+        // Call the real Gemma library function through function pointer
+        void* module_ptr = g_create_module_fn(path);
         
         // Release the string
         env->ReleaseStringUTFChars(model_path, path);
@@ -36,7 +113,6 @@ extern "C" {
         // Check for errors
         if (module_ptr == nullptr) {
             LOGE("CRITICAL ERROR: Failed to create chat module - real implementation required");
-            // Throw a Java exception to indicate failure
             env->ThrowNew(
                 env->FindClass("java/lang/RuntimeException"),
                 "Failed to initialize real Gemma language model - no mock implementation allowed"
@@ -59,12 +135,22 @@ extern "C" {
             JNIEnv* env, jobject thiz, jstring prompt) {
         LOGI("JNI: generate called");
         
+        // Check if library is initialized
+        if (g_generate_fn == nullptr) {
+            LOGE("CRITICAL ERROR: Gemma library not initialized");
+            env->ThrowNew(
+                env->FindClass("java/lang/RuntimeException"),
+                "Gemma library not initialized - required for real implementation"
+            );
+            return env->NewStringUTF("ERROR: Gemma library not initialized");
+        }
+        
         // Convert Java string to C string
         const char* promptStr = env->GetStringUTFChars(prompt, 0);
         LOGI("Prompt: %s", promptStr);
         
-        // Call the real Gemma library function
-        char* result = generate(promptStr);
+        // Call the real Gemma library function through function pointer
+        char* result = g_generate_fn(promptStr);
         
         // Release the string
         env->ReleaseStringUTFChars(prompt, promptStr);
@@ -72,7 +158,6 @@ extern "C" {
         // Check for errors
         if (result == nullptr) {
             LOGE("CRITICAL ERROR: Failed to generate response - real implementation required");
-            // Throw a Java exception to indicate failure
             env->ThrowNew(
                 env->FindClass("java/lang/RuntimeException"),
                 "Failed to generate response using real Gemma language model - no mock implementation allowed"
@@ -97,8 +182,18 @@ extern "C" {
             JNIEnv* env, jobject thiz) {
         LOGI("JNI: reset_chat called");
         
-        // Call the real Gemma library function
-        reset_chat();
+        // Check if library is initialized
+        if (g_reset_chat_fn == nullptr) {
+            LOGE("CRITICAL ERROR: Gemma library not initialized");
+            env->ThrowNew(
+                env->FindClass("java/lang/RuntimeException"),
+                "Gemma library not initialized - required for real implementation"
+            );
+            return;
+        }
+        
+        // Call the real Gemma library function through function pointer
+        g_reset_chat_fn();
         
         LOGI("Successfully reset chat using real Gemma library");
     }
@@ -109,16 +204,43 @@ extern "C" {
             JNIEnv* env, jobject thiz, jstring key, jfloat value) {
         LOGI("JNI: set_parameter called");
         
+        // Check if library is initialized
+        if (g_set_parameter_fn == nullptr) {
+            LOGE("CRITICAL ERROR: Gemma library not initialized");
+            env->ThrowNew(
+                env->FindClass("java/lang/RuntimeException"),
+                "Gemma library not initialized - required for real implementation"
+            );
+            return;
+        }
+        
         // Convert Java string to C string
         const char* keyStr = env->GetStringUTFChars(key, 0);
         LOGI("Parameter %s = %f", keyStr, value);
         
-        // Call the real Gemma library function
-        set_parameter(keyStr, value);
+        // Call the real Gemma library function through function pointer
+        g_set_parameter_fn(keyStr, value);
         
         // Release the string
         env->ReleaseStringUTFChars(key, keyStr);
         
         LOGI("Successfully set parameter using real Gemma library");
+    }
+    
+    // Add a shutdown function to clean up resources
+    JNIEXPORT void JNICALL
+    Java_com_example_studybuddy_ml_SimpleMlcModel_shutdown_1native(
+            JNIEnv* env, jobject thiz) {
+        LOGI("JNI: shutdown_native called");
+        
+        if (g_lib_handle != nullptr) {
+            dlclose(g_lib_handle);
+            g_lib_handle = nullptr;
+            g_create_module_fn = nullptr;
+            g_generate_fn = nullptr;
+            g_reset_chat_fn = nullptr;
+            g_set_parameter_fn = nullptr;
+            LOGI("Successfully shut down Gemma library");
+        }
     }
 } 
